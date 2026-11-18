@@ -622,28 +622,50 @@ export function removeNodeFromTree(root: UINode, targetId: string): UINode {
   if (filtered.length !== root.children.length) {
     return { ...root, children: filtered };
   }
-  return {
-    ...root,
-    children: root.children.map((c) => removeNodeFromTree(c, targetId)),
-  };
+  let changed = false;
+  const nextChildren = root.children.map((c) => {
+    const updated = removeNodeFromTree(c, targetId);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...root, children: nextChildren } : root;
 }
 
-export function insertNodeInTree(
+function ensureUniqueNodeIds(node: UINode, existingIds: Set<string>): UINode {
+  let id = node.id;
+  if (existingIds.has(id)) {
+    do {
+      id = createNodeId(node.tag);
+    } while (existingIds.has(id));
+  }
+  existingIds.add(id);
+  const nextChildren = node.children.map((c) =>
+    ensureUniqueNodeIds(c, existingIds)
+  );
+  const childrenChanged = nextChildren.some((c, i) => c !== node.children[i]);
+  if (id === node.id && !childrenChanged) return node;
+  return { ...node, id, children: nextChildren };
+}
+
+function insertNodeAtTarget(
   root: UINode,
   targetId: string,
   newNode: UINode,
   position: DropPosition
 ): UINode {
   if (position === 'inside') {
-    if (root.id === targetId && root.isContainer) {
-      return { ...root, children: [...root.children, newNode] };
+    if (root.id === targetId) {
+      return root.isContainer
+        ? { ...root, children: [...root.children, newNode] }
+        : root;
     }
-    return {
-      ...root,
-      children: root.children.map((c) =>
-        insertNodeInTree(c, targetId, newNode, 'inside')
-      ),
-    };
+    let changed = false;
+    const nextChildren = root.children.map((c) => {
+      const updated = insertNodeAtTarget(c, targetId, newNode, 'inside');
+      if (updated !== c) changed = true;
+      return updated;
+    });
+    return changed ? { ...root, children: nextChildren } : root;
   }
 
   const idx = root.children.findIndex((c) => c.id === targetId);
@@ -654,12 +676,27 @@ export function insertNodeInTree(
     return { ...root, children: nextChildren };
   }
 
-  return {
-    ...root,
-    children: root.children.map((c) =>
-      insertNodeInTree(c, targetId, newNode, position)
-    ),
-  };
+  let changed = false;
+  const nextChildren = root.children.map((c) => {
+    const updated = insertNodeAtTarget(c, targetId, newNode, position);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...root, children: nextChildren } : root;
+}
+
+export function insertNodeInTree(
+  root: UINode,
+  targetId: string,
+  newNode: UINode,
+  position: DropPosition
+): UINode {
+  if (targetId === root.id && position !== 'inside') {
+    return root;
+  }
+  const existingIds = collectAllIds(root);
+  const uniqueNode = ensureUniqueNodeIds(newNode, existingIds);
+  return insertNodeAtTarget(root, targetId, uniqueNode, position);
 }
 
 export function duplicateNodeInTree(
@@ -682,18 +719,32 @@ export function moveNodeInTree(
   targetId: string,
   position: DropPosition
 ): UINode {
-  if (sourceId === 'root' || sourceId === targetId) return root;
+  if (sourceId === root.id || sourceId === 'root' || sourceId === targetId) {
+    return root;
+  }
   if (isDescendantOrSelf(root, sourceId, targetId)) return root;
 
   const sourceNode = findNodeById(root, sourceId);
   const targetNode = findNodeById(root, targetId);
-  if (!sourceNode || !targetNode || sourceNode.locked) return root;
+  if (!sourceNode || !targetNode || sourceNode.locked || targetNode.locked) {
+    return root;
+  }
 
   const effectivePosition: DropPosition =
     position === 'inside' && !targetNode.isContainer ? 'after' : position;
 
+  // Cannot insert before/after the root node itself; would otherwise drop and lose sourceNode.
+  if (targetNode.id === root.id && effectivePosition !== 'inside') {
+    return root;
+  }
+
   const withoutSource = removeNodeFromTree(root, sourceId);
-  return insertNodeInTree(withoutSource, targetId, sourceNode, effectivePosition);
+  return insertNodeAtTarget(
+    withoutSource,
+    targetId,
+    sourceNode,
+    effectivePosition
+  );
 }
 
 export function reorderSiblingInTree(
@@ -710,12 +761,13 @@ export function reorderSiblingInTree(
     next.splice(swapIdx, 0, item);
     return { ...root, children: next };
   }
-  return {
-    ...root,
-    children: root.children.map((c) =>
-      reorderSiblingInTree(c, targetId, direction)
-    ),
-  };
+  let changed = false;
+  const nextChildren = root.children.map((c) => {
+    const updated = reorderSiblingInTree(c, targetId, direction);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...root, children: nextChildren } : root;
 }
 
 export function countNodesInTree(node: UINode): number {

@@ -295,19 +295,28 @@ export default function LikharaEditor({
   );
   const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
 
-  // Transaction-Aware Undo/Redo History State
-  const [history, setHistory] = useState<HistoryFrame[]>([
-    {
-      root: initialRoot,
-      selectedId: initialSelectedId,
-      label: 'Initial Workspace',
-      timestamp: Date.now(),
-    },
-  ]);
-  const [historyIndex, setHistoryIndex] = useState<number>(0);
+  // Transaction-Aware Undo/Redo History State (atomic frames + index)
+  const [historyState, setHistoryState] = useState<{
+    frames: HistoryFrame[];
+    index: number;
+  }>({
+    frames: [
+      {
+        root: initialRoot,
+        selectedId: initialSelectedId,
+        label: 'Initial Workspace',
+        timestamp: Date.now(),
+      },
+    ],
+    index: 0,
+  });
+  const history = historyState.frames;
+  const historyIndex = historyState.index;
 
   // Live active root during continuous gestures (sliders, resizing, typing)
   const [liveRoot, setLiveRoot] = useState<UINode>(initialRoot);
+  const liveRootRef = useRef<UINode>(initialRoot);
+  liveRootRef.current = liveRoot;
   const [selectedId, setSelectedId] = useState<string>(initialSelectedId);
   const gestureStartSnapshotRef = useRef<UINode | null>(null);
 
@@ -418,6 +427,7 @@ export default function LikharaEditor({
   // --------------------------------------------------------------------------
   const commitTree = useCallback(
     (nextRoot: UINode, nextSelectId?: string, label = 'Edit Element') => {
+      liveRootRef.current = nextRoot;
       setLiveRoot(nextRoot);
       const validSel = resolveValidSelectedId(
         nextRoot,
@@ -425,15 +435,15 @@ export default function LikharaEditor({
       );
       setSelectedId(validSel);
 
-      setHistory((prev) => {
-        const currentFrame = prev[historyIndex];
+      setHistoryState((prev) => {
+        const currentFrame = prev.frames[prev.index];
         if (
           currentFrame &&
           JSON.stringify(currentFrame.root) === JSON.stringify(nextRoot)
         ) {
           return prev; // Deduplicate no-op commits
         }
-        const sliced = prev.slice(0, historyIndex + 1);
+        const sliced = prev.frames.slice(0, prev.index + 1);
         const pushed: HistoryFrame = {
           root: nextRoot,
           selectedId: validSel,
@@ -441,32 +451,27 @@ export default function LikharaEditor({
           timestamp: Date.now(),
         };
         const updated = [...sliced, pushed];
-        return updated.length > MAX_HISTORY_FRAMES
-          ? updated.slice(updated.length - MAX_HISTORY_FRAMES)
-          : updated;
-      });
-
-      setHistoryIndex((prevIdx) => {
-        const currentFrame = history[prevIdx];
-        if (
-          currentFrame &&
-          JSON.stringify(currentFrame.root) === JSON.stringify(nextRoot)
-        ) {
-          return prevIdx;
-        }
-        return Math.min(prevIdx + 1, MAX_HISTORY_FRAMES - 1);
+        const bounded =
+          updated.length > MAX_HISTORY_FRAMES
+            ? updated.slice(updated.length - MAX_HISTORY_FRAMES)
+            : updated;
+        return {
+          frames: bounded,
+          index: bounded.length - 1,
+        };
       });
     },
-    [activeSelectedId, history, historyIndex]
+    [activeSelectedId]
   );
 
   const beginGestureTransaction = useCallback(() => {
     if (!gestureStartSnapshotRef.current) {
-      gestureStartSnapshotRef.current = liveRoot;
+      gestureStartSnapshotRef.current = liveRootRef.current;
     }
-  }, [liveRoot]);
+  }, []);
 
   const replaceCurrentTreeFrame = useCallback((nextRoot: UINode) => {
+    liveRootRef.current = nextRoot;
     setLiveRoot(nextRoot);
   }, []);
 
@@ -474,15 +479,16 @@ export default function LikharaEditor({
     (label = 'Adjust Style') => {
       const startTree = gestureStartSnapshotRef.current;
       gestureStartSnapshotRef.current = null;
+      const latestRoot = liveRootRef.current;
       if (
         startTree &&
-        JSON.stringify(startTree) === JSON.stringify(liveRoot)
+        JSON.stringify(startTree) === JSON.stringify(latestRoot)
       ) {
         return; // No actual change occurred during gesture
       }
-      commitTree(liveRoot, activeSelectedId, label);
+      commitTree(latestRoot, activeSelectedId, label);
     },
-    [liveRoot, activeSelectedId, commitTree]
+    [activeSelectedId, commitTree]
   );
 
   const handleUndo = useCallback(() => {
@@ -490,7 +496,8 @@ export default function LikharaEditor({
     const targetIdx = historyIndex - 1;
     const frame = history[targetIdx];
     if (!frame) return;
-    setHistoryIndex(targetIdx);
+    setHistoryState((prev) => ({ ...prev, index: targetIdx }));
+    liveRootRef.current = frame.root;
     setLiveRoot(frame.root);
     setSelectedId(resolveValidSelectedId(frame.root, frame.selectedId));
   }, [history, historyIndex]);
@@ -500,7 +507,8 @@ export default function LikharaEditor({
     const targetIdx = historyIndex + 1;
     const frame = history[targetIdx];
     if (!frame) return;
-    setHistoryIndex(targetIdx);
+    setHistoryState((prev) => ({ ...prev, index: targetIdx }));
+    liveRootRef.current = frame.root;
     setLiveRoot(frame.root);
     setSelectedId(resolveValidSelectedId(frame.root, frame.selectedId));
   }, [history, historyIndex]);
