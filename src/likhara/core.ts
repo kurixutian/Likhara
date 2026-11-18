@@ -1999,7 +1999,7 @@ export const PALETTE_DEFINITIONS: PaletteDefinition[] = [
       ariaLabel: 'Deploy Workspace',
       style: createDefaultStyle({
         width: 'fit-content',
-        bgColor: '#0284c7',
+        bgColor: '#0369a1',
         bgAlpha: 100,
         textColor: '#ffffff',
         textAlpha: 100,
@@ -2158,12 +2158,12 @@ export const DEFAULT_LIKHARA_STARTER_TREE: UINode = {
     bgAlpha: 100,
     borderColor: '#27272a',
     borderAlpha: 100,
-    borderWidth: 1,
+    borderWidth: 0,
     borderRadius: 16,
     paddingX: 28,
     paddingY: 28,
     gap: 20,
-    shadow: 'xl',
+    shadow: 'none',
   }),
   children: [
     {
@@ -2331,7 +2331,7 @@ export const DEFAULT_LIKHARA_STARTER_TREE: UINode = {
               ariaLabel: 'Verify and Export',
               style: createDefaultStyle({
                 width: 'fit-content',
-                bgColor: '#0284c7',
+                bgColor: '#0369a1',
                 bgAlpha: 100,
                 textColor: '#ffffff',
                 textAlpha: 100,

@@ -222,14 +222,14 @@ export default function ProjectHome({
     <div className="min-h-[100dvh] bg-zinc-950 text-zinc-100 font-sans">
       <header className="border-b border-zinc-800 bg-zinc-900 px-4 sm:px-8 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-md bg-sky-600 flex items-center justify-center text-white font-bold text-[10px] tracking-wider shrink-0">
+          <div className="w-8 h-8 rounded-md bg-sky-600 flex items-center justify-center text-white font-bold text-xs tracking-wider shrink-0">
             LK
           </div>
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold tracking-tight text-zinc-100 truncate">
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight text-zinc-100 truncate">
               Likhara Studio
             </h1>
-            <p className="hidden sm:block text-[11px] text-zinc-400 truncate">
+            <p className="hidden sm:block text-xs text-zinc-400 truncate">
               Visual UI builder · projects stored locally on this device
             </p>
           </div>
@@ -324,7 +324,7 @@ export default function ProjectHome({
             }`}
           >
             <p
-              className={`text-xs ${
+              className={`text-sm ${
                 feedback.type === 'success'
                   ? 'text-emerald-200'
                   : 'text-rose-200'
@@ -345,8 +345,8 @@ export default function ProjectHome({
 
         {phase === 'ready' && projects.length > 0 && (
           <section>
-            <h2 className="text-sm font-semibold text-zinc-100">Projects</h2>
-            <p className="text-xs text-zinc-500 mt-0.5 mb-4">
+            <h2 className="text-base font-semibold text-zinc-100">Projects</h2>
+            <p className="text-sm text-zinc-400 mt-0.5 mb-4">
               {projects.length} project{projects.length === 1 ? '' : 's'} on
               this device
             </p>
@@ -368,10 +368,10 @@ export default function ProjectHome({
                         {project.name}
                       </button>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
-                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
-                          &lt;{project.viewport.mode}&gt;
+                        <span className="px-1.5 py-0.5 rounded-md text-xs font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
+                          {project.viewport.mode}
                         </span>
-                        <span className="text-[11px] font-mono text-zinc-500">
+                        <span className="text-xs font-mono text-zinc-400">
                           Edited {formatRelativeTime(project.updatedAt)}
                         </span>
                       </div>
@@ -444,13 +444,12 @@ export default function ProjectHome({
 
         {phase === 'ready' && projects.length === 0 && (
           <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 py-16 px-6 text-center space-y-3">
-            <FileJson className="w-8 h-8 text-zinc-600 mx-auto" />
-            <h2 className="text-sm font-semibold text-zinc-200">
+            <FileJson className="w-8 h-8 text-zinc-400 mx-auto" />
+            <h2 className="text-base font-semibold text-zinc-200">
               No projects yet
             </h2>
-            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-              Create your first project to open the visual editor, or import a
-              previously exported Likhara project file.
+            <p className="text-sm text-zinc-400 max-w-xs mx-auto">
+              Create a new project to open the visual editor, or import an existing project JSON file.
             </p>
             <div className="flex items-center justify-center gap-2 pt-1">
               <button

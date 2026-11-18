@@ -12,6 +12,12 @@
   --radius-2xl: 10px;
   --radius-3xl: 12px;
 
+  /* WCAG AA contrast overrides on dark chrome surfaces */
+  --color-sky-600: #0369a1;
+  --color-emerald-600: #047857;
+  --color-zinc-500: #a1a1aa;
+  --color-zinc-600: #a1a1aa;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono",

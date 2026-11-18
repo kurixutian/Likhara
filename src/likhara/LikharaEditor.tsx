@@ -89,7 +89,11 @@ import type {
   FontWeightToken,
   InputFieldType,
   ButtonActionType,
-  UITag,
+    BlurToken,
+    ShadowToken,
+    JustifyMode,
+    AlignMode,
+    UITag,
 } from './core';
 import { saveProjectRecord } from './projects/storage';
 
@@ -132,13 +136,13 @@ const ColorAlphaControl: React.FC<ColorAlphaControlProps> = ({
   const liveRgba = hexToRgba(hexColor, alphaPercent);
 
   return (
-    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/90 space-y-2.5">
+    <div className="py-3 border-b border-zinc-800 space-y-2.5">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-medium text-zinc-300 flex items-center gap-1.5">
           <Droplets className="w-3.5 h-3.5 text-sky-400" />
           {label}
         </span>
-        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-800">
+        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-800">
           {alphaPercent === 0
             ? 'Transparent'
             : `${hexColor.toUpperCase()} • ${alphaPercent}%`}
@@ -191,7 +195,7 @@ const ColorAlphaControl: React.FC<ColorAlphaControlProps> = ({
             }
           }}
           onBlur={() => onGestureCommit(`Edit ${label} Hex`)}
-          className="w-24 px-2 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100 focus:outline-none focus:border-sky-500"
+          className="w-24 px-2 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100 focus:border-sky-500"
         />
 
         {allowClear && (
@@ -202,7 +206,7 @@ const ColorAlphaControl: React.FC<ColorAlphaControlProps> = ({
               onLiveChange({ alpha: alphaPercent === 0 ? 100 : 0 });
               setTimeout(() => onGestureCommit(`Toggle ${label} Alpha`), 0);
             }}
-            className={`px-2 py-1.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
+            className={`px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
               alphaPercent === 0
                 ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
                 : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
@@ -253,7 +257,7 @@ const ColorAlphaControl: React.FC<ColorAlphaControlProps> = ({
                 setTimeout(() => onGestureCommit(`Select ${label} Swatch`), 0);
               }}
               style={{ backgroundColor: swatch }}
-              className={`w-4 h-4 rounded border transition-transform cursor-pointer ${
+              className={`w-6 h-6 rounded border transition-transform cursor-pointer ${
                 isSelected
                   ? 'scale-125 border-white ring-1 ring-sky-400'
                   : 'border-zinc-700 hover:scale-110'
@@ -538,7 +542,7 @@ export default function LikharaEditor({
     setSelectedId(resolveValidSelectedId(frame.root, frame.selectedId));
   }, [history, historyIndex]);
 
-  // Keyboard shortcuts for Undo / Redo
+  // Keyboard shortcuts for Undo / Redo / Duplicate / Delete
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = document.activeElement?.tagName.toLowerCase();
@@ -547,11 +551,28 @@ export default function LikharaEditor({
         e.preventDefault();
         if (e.shiftKey) handleRedo();
         else handleUndo();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        if (activeSelectedId !== 'root') {
+          e.preventDefault();
+          const res = duplicateNodeInTree(liveRootRef.current, activeSelectedId);
+          if (res.duplicatedId) {
+            commitTree(res.tree, res.duplicatedId, 'Duplicate Element');
+          }
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (activeSelectedId !== 'root') {
+          const node = findNodeById(liveRootRef.current, activeSelectedId);
+          if (node && !node.locked) {
+            e.preventDefault();
+            const fallbackId = findParentId(liveRootRef.current, activeSelectedId) || 'root';
+            commitTree(removeNodeFromTree(liveRootRef.current, activeSelectedId), fallbackId, `Delete ${node.name}`);
+          }
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, activeSelectedId, commitTree]);
 
   // --------------------------------------------------------------------------
   // Selected Node Updaters
@@ -993,11 +1014,13 @@ export default function LikharaEditor({
     const floatingBar = isSelected ? (
       <div
         onClick={(e) => e.stopPropagation()}
-        className="absolute -top-7 left-0 z-30 flex items-center gap-1 px-2 py-0.5 rounded bg-sky-600 text-white shadow-lg text-[10px] font-mono select-none whitespace-nowrap"
+        className={`absolute z-30 flex items-center gap-1 px-2 py-0.5 rounded bg-sky-600 text-white shadow-lg text-[11px] font-mono select-none whitespace-nowrap max-w-[calc(100vw-2rem)] overflow-x-auto ${
+          node.id === 'root' ? 'top-1 left-1' : '-top-7 left-0'
+        }`}
       >
         <span className="font-bold">&lt;{node.tag}&gt;</span>
         <span className="font-sans font-medium pr-1">{node.name}</span>
-        <span className="px-1 rounded bg-sky-900/80 text-[9px]">
+        <span className="px-1 rounded bg-sky-900/80 text-[11px]">
           {node.style.opacity}%
         </span>
 
@@ -1067,6 +1090,16 @@ export default function LikharaEditor({
 
     const commonInteractionProps = {
       draggable: !isPreviewMode && node.id !== 'root' && !node.locked,
+      tabIndex: !isPreviewMode ? 0 : undefined,
+      onKeyDown: !isPreviewMode
+        ? (e: React.KeyboardEvent<HTMLElement>) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              setSelectedId(node.id);
+            }
+          }
+        : undefined,
       onDragStart: (e: React.DragEvent<HTMLElement>) =>
         handleNodeDragStart(e, node),
       onDragOver: (e: React.DragEvent<HTMLElement>) =>
@@ -1273,7 +1306,7 @@ export default function LikharaEditor({
               <span className="text-[11px] text-zinc-400 font-medium">
                 Empty {node.name} (&lt;{node.tag}&gt;)
               </span>
-              <span className="text-[10px] text-zinc-500">
+              <span className="text-[11px] text-zinc-500">
                 Drop elements or click + in palette
               </span>
             </div>
@@ -1295,7 +1328,19 @@ export default function LikharaEditor({
     return (
       <div key={node.id} className="select-none">
         <div
+          role="treeitem"
+          tabIndex={0}
+          aria-selected={isSelected}
           onClick={() => setSelectedId(node.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setSelectedId(node.id);
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && node.id !== 'root' && !node.locked) {
+              e.preventDefault();
+              handleDeleteNode(node.id);
+            }
+          }}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           className={`group flex items-center justify-between py-1.5 pr-1.5 rounded-md text-xs cursor-pointer transition-colors ${
             isSelected
@@ -1328,7 +1373,7 @@ export default function LikharaEditor({
             ) : (
               <span className="w-4 inline-block shrink-0" />
             )}
-            <span className="font-mono text-[10px] text-zinc-500 shrink-0">
+            <span className="font-mono text-[11px] text-zinc-500 shrink-0">
               &lt;{node.tag}&gt;
             </span>
             <span className="truncate">{node.name}</span>
@@ -1405,7 +1450,7 @@ export default function LikharaEditor({
          ==================================================================== */}
       <header className="h-13 shrink-0 border-b border-zinc-800 bg-zinc-900 px-2 sm:px-3 flex items-center justify-between gap-2 relative">
         {/* Left: Brand Identity + Project Name + Save/Migration Status */}
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             type="button"
             aria-label="Back to Project Home"
@@ -1415,12 +1460,12 @@ export default function LikharaEditor({
           >
             <Home className="w-4 h-4" />
           </button>
-          <div className="hidden sm:flex w-7 h-7 rounded-md bg-sky-600 items-center justify-center text-white font-bold text-[10px] tracking-wider shrink-0">
+          <div className="hidden sm:flex w-7 h-7 rounded-md bg-zinc-800 border border-zinc-700 items-center justify-center text-zinc-200 font-bold text-[11px] tracking-wider shrink-0">
             LK
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="sr-only lg:not-sr-only lg:inline text-xs font-semibold tracking-tight text-zinc-100">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <h1 className="sr-only lg:not-sr-only lg:inline text-xs font-semibold tracking-tight text-zinc-100 shrink-0">
                 Likhara Studio
               </h1>
               <input
@@ -1433,13 +1478,18 @@ export default function LikharaEditor({
                     name: e.target.value,
                   }))
                 }
-                className="px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-medium focus:outline-none focus:border-sky-500 w-20 shrink-0 sm:w-44"
+                onBlur={(e) => {
+                  if (!e.target.value.trim()) {
+                    setProjectMeta((prev) => ({ ...prev, name: 'Untitled Project' }));
+                  }
+                }}
+                className="px-2 py-0.5 rounded-md bg-transparent hover:bg-zinc-950 focus:bg-zinc-950 border border-transparent hover:border-zinc-800 focus:border-sky-500 text-xs text-zinc-100 font-medium w-16 min-w-0 sm:w-44"
               />
               <span
                 role="status"
                 aria-live="polite"
                 title={saveErrorMsg || 'Local persistence status'}
-                className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono border shrink-0 ${
+                className={`px-1.5 py-0.5 rounded-md text-[11px] font-mono border shrink-0 ${
                   saveStatus === 'saved'
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                     : saveStatus === 'saving'
@@ -1453,6 +1503,15 @@ export default function LikharaEditor({
                   ? 'Saving...'
                   : 'Save Error'}
               </span>
+              {saveStatus === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => setProjectMeta((prev) => ({ ...prev, updatedAt: new Date().toISOString() }))}
+                  className="px-1.5 py-0.5 rounded text-[11px] bg-rose-900/60 border border-rose-500/50 text-rose-100 hover:bg-rose-900 cursor-pointer shrink-0"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1472,7 +1531,7 @@ export default function LikharaEditor({
             >
               <Undo2 className="w-3.5 h-3.5" />
             </button>
-            <span className="hidden sm:inline px-1.5 font-mono text-[10px] text-zinc-500">
+            <span className="hidden sm:inline px-1.5 font-mono text-[11px] text-zinc-500">
               {historyIndex + 1}/{history.length}
             </span>
             <button
@@ -1487,9 +1546,11 @@ export default function LikharaEditor({
             </button>
           </div>
 
-          <div className="hidden lg:flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
+          <div role="tablist" aria-label="Workspace mode" className="hidden lg:flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
             <button
               type="button"
+              role="tab"
+              aria-selected={workspaceMode === 'design'}
               onClick={() => setWorkspaceMode('design')}
               className={`px-2.5 py-1 rounded flex items-center gap-1.5 cursor-pointer ${
                 workspaceMode === 'design'
@@ -1502,6 +1563,8 @@ export default function LikharaEditor({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={workspaceMode === 'split'}
               onClick={() => setWorkspaceMode('split')}
               className={`px-2.5 py-1 rounded flex items-center gap-1.5 cursor-pointer ${
                 workspaceMode === 'split'
@@ -1514,6 +1577,8 @@ export default function LikharaEditor({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={workspaceMode === 'preview'}
               onClick={() => {
                 setWorkspaceMode('preview');
                 setPreviewFeedback(null);
@@ -1543,7 +1608,10 @@ export default function LikharaEditor({
           <div className="hidden lg:flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setShowImportModal(true)}
+              onClick={() => {
+                setImportFeedback(null);
+                setShowImportModal(true);
+              }}
               title="Import & Validate Project JSON"
               className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs flex items-center gap-1.5 cursor-pointer"
             >
@@ -1635,7 +1703,7 @@ export default function LikharaEditor({
                 aria-label="More actions"
                 className="absolute right-2 top-12 z-50 w-60 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/50 py-1.5 max-lg:mr-1"
               >
-                <p className="px-3 pt-1 pb-1.5 text-[10px] font-mono uppercase tracking-wide text-zinc-500">
+                <p className="px-3 pt-1 pb-1.5 text-[11px] font-mono uppercase tracking-wide text-zinc-500">
                   Workspace Mode
                 </p>
                 <div className="flex gap-1 px-2 pb-1">
@@ -1682,7 +1750,7 @@ export default function LikharaEditor({
                     Preview
                   </button>
                 </div>
-                <p className="px-3 pt-2 pb-1.5 text-[10px] font-mono uppercase tracking-wide text-zinc-500">
+                <p className="px-3 pt-2 pb-1.5 text-[11px] font-mono uppercase tracking-wide text-zinc-500">
                   Preview Viewport
                 </p>
                 <div className="flex gap-1 px-2 pb-1.5">
@@ -1715,6 +1783,7 @@ export default function LikharaEditor({
                   role="menuitem"
                   onClick={() => {
                     setMobileMenuOpen(false);
+                    setImportFeedback(null);
                     setShowImportModal(true);
                   }}
                   className="w-full text-left px-3 py-2.5 text-xs flex items-center gap-2.5 hover:bg-zinc-800 text-zinc-200 cursor-pointer"
@@ -1804,7 +1873,7 @@ export default function LikharaEditor({
               value={importJsonText}
               onChange={(e) => setImportJsonText(e.target.value)}
               placeholder='{"schemaVersion": 1, "name": "My Project", "root": { ... }}'
-              className="w-full p-3 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
+              className="w-full p-3 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-200 focus:border-sky-500"
             />
 
             {importFeedback && importFeedback.type === 'error' && (
@@ -1861,13 +1930,15 @@ export default function LikharaEditor({
           className={`w-64 shrink-0 border-r border-zinc-800 bg-zinc-900/70 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
             mobilePanel === 'left'
               ? 'max-lg:translate-x-0'
-              : 'max-lg:-translate-x-full'
+              : 'max-lg:-translate-x-full max-lg:invisible max-lg:pointer-events-none'
           }`}
         >
           <div className="flex items-stretch border-b border-zinc-800 bg-zinc-900">
-            <div className="grid grid-cols-2 flex-1 p-2 gap-1 min-w-0">
+            <div role="tablist" aria-label="Left panel view" className="grid grid-cols-2 flex-1 p-2 gap-1 min-w-0">
             <button
               type="button"
+              role="tab"
+              aria-selected={leftTab === 'palette'}
               onClick={() => setLeftTab('palette')}
               className={`py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
                 leftTab === 'palette'
@@ -1880,6 +1951,8 @@ export default function LikharaEditor({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={leftTab === 'layers'}
               onClick={() => setLeftTab('layers')}
               className={`py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
                 leftTab === 'layers'
@@ -1905,7 +1978,7 @@ export default function LikharaEditor({
             <div className="flex-1 overflow-y-auto p-3 space-y-4">
               {/* Placement Mode Selector for Touch/Click Insertion */}
               <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800 space-y-1.5">
-                <span className="block text-[10px] font-mono uppercase text-zinc-400">
+                <span className="block text-[11px] font-mono uppercase text-zinc-400">
                   Quick-Insert Placement
                 </span>
                 <div className="grid grid-cols-3 gap-1">
@@ -1915,7 +1988,7 @@ export default function LikharaEditor({
                         key={pos}
                         type="button"
                         onClick={() => setInsertMode(pos)}
-                        className={`py-1 rounded text-[10px] font-mono capitalize border cursor-pointer ${
+                        className={`py-1 rounded text-[11px] font-mono capitalize border cursor-pointer ${
                           insertMode === pos
                             ? 'bg-sky-500/20 border-sky-500 text-sky-200'
                             : 'bg-zinc-900 border-zinc-800 text-zinc-400'
@@ -1931,10 +2004,10 @@ export default function LikharaEditor({
               {/* Containers */}
               <div>
                 <div className="flex items-center justify-between mb-1.5 px-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                     Layout Containers
                   </span>
-                  <span className="text-[10px] text-zinc-500">Drag or +</span>
+                  <span className="text-[11px] text-zinc-500">Drag or +</span>
                 </div>
                 <div className="space-y-1.5">
                   {PALETTE_DEFINITIONS.filter(
@@ -1951,9 +2024,9 @@ export default function LikharaEditor({
                         <div className="text-xs font-medium text-zinc-200 truncate">
                           {item.label}
                         </div>
-                        <div className="text-[10px] text-zinc-500 truncate">
+                        <span className="block text-[11px] text-zinc-400 truncate">
                           {item.description}
-                        </div>
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -1971,10 +2044,10 @@ export default function LikharaEditor({
               {/* Semantic Elements */}
               <div>
                 <div className="flex items-center justify-between mb-1.5 px-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                     Semantic Elements
                   </span>
-                  <span className="text-[10px] text-zinc-500">Drag or +</span>
+                  <span className="text-[11px] text-zinc-500">Drag or +</span>
                 </div>
                 <div className="space-y-1.5">
                   {PALETTE_DEFINITIONS.filter(
@@ -1991,9 +2064,9 @@ export default function LikharaEditor({
                         <div className="text-xs font-medium text-zinc-200 truncate">
                           {item.label}
                         </div>
-                        <div className="text-[10px] text-zinc-500 truncate">
+                        <span className="block text-[11px] text-zinc-400 truncate">
                           {item.description}
-                        </div>
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -2023,14 +2096,14 @@ export default function LikharaEditor({
         <main className="flex-1 flex flex-col overflow-hidden bg-zinc-950">
           {/* Canvas Toolbar */}
           <div className="h-9 shrink-0 px-3 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between gap-3 text-xs max-lg:overflow-x-auto max-lg:whitespace-nowrap max-lg:[&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-            <div className="flex items-center gap-2 truncate">
-              <span className="font-mono text-[11px] text-sky-400">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono text-[11px] text-sky-400 shrink-0">
                 Selection:
               </span>
-              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-medium truncate">
+              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-medium truncate min-w-0 max-w-[180px] sm:max-w-none">
                 {selectedNode.name} (&lt;{selectedNode.tag}&gt;)
               </span>
-              <span className="hidden md:inline font-mono text-[10px] text-zinc-500">
+              <span className="hidden md:inline font-mono text-[11px] text-zinc-400 shrink-0">
                 W: {selectedNode.style.width} • H: {selectedNode.style.height} •
                 Opacity: {selectedNode.style.opacity}%
               </span>
@@ -2059,7 +2132,7 @@ export default function LikharaEditor({
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="font-mono text-[10px] text-zinc-300 w-9 text-center">
+                <span className="font-mono text-[11px] text-zinc-300 w-9 text-center">
                   {canvasZoom}%
                 </span>
                 <button
@@ -2128,7 +2201,7 @@ export default function LikharaEditor({
               <button
                 type="button"
                 onClick={() => setPreviewFeedback(null)}
-                className="text-[10px] underline cursor-pointer"
+                className="text-[11px] underline cursor-pointer"
               >
                 Dismiss
               </button>
@@ -2140,7 +2213,7 @@ export default function LikharaEditor({
             onClick={() => !isPreviewMode && setSelectedId('root')}
             className={`${
               workspaceMode === 'split' ? 'h-[58%]' : 'flex-1'
-            } overflow-auto p-8 flex justify-center items-start border-b border-zinc-800 ${
+            } overflow-auto p-3 sm:p-8 flex justify-center items-start border-b border-zinc-800 ${
               showGrid
                 ? 'bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:18px_18px]'
                 : 'bg-zinc-950'
@@ -2169,9 +2242,11 @@ export default function LikharaEditor({
               <div className="h-9 shrink-0 px-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between gap-3 max-lg:overflow-x-auto max-lg:whitespace-nowrap max-lg:[&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
                 <div className="flex items-center gap-2 shrink-0">
                   <FileCode className="w-3.5 h-3.5 text-sky-400" />
-                  <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 text-[11px] font-mono">
+                  <div role="tablist" aria-label="Export format" className="flex items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 text-[11px] font-mono">
                     <button
                       type="button"
+                      role="tab"
+                      aria-selected={codeFormat === 'react-tw'}
                       onClick={() => setCodeFormat('react-tw')}
                       className={`px-2 py-0.5 rounded cursor-pointer ${
                         codeFormat === 'react-tw'
@@ -2183,6 +2258,8 @@ export default function LikharaEditor({
                     </button>
                     <button
                       type="button"
+                      role="tab"
+                      aria-selected={codeFormat === 'react-inline'}
                       onClick={() => setCodeFormat('react-inline')}
                       className={`px-2 py-0.5 rounded cursor-pointer ${
                         codeFormat === 'react-inline'
@@ -2194,6 +2271,8 @@ export default function LikharaEditor({
                     </button>
                     <button
                       type="button"
+                      role="tab"
+                      aria-selected={codeFormat === 'html'}
                       onClick={() => setCodeFormat('html')}
                       className={`px-2 py-0.5 rounded cursor-pointer ${
                         codeFormat === 'html'
@@ -2206,16 +2285,16 @@ export default function LikharaEditor({
                   </div>
 
                   {!exportValidation.valid ? (
-                    <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded">
                       <AlertTriangle className="w-3 h-3" />
                       {exportValidation.errors[0]}
                     </span>
                   ) : exportDiagnostics.length === 0 ? (
-                    <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
                       <CheckCircle2 className="w-3 h-3" />Validated • 0 Warnings
                     </span>
                   ) : (
-                    <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
                       <AlertTriangle className="w-3 h-3" />
                       Validated • {exportDiagnostics.length} Diagnostic(s)
                     </span>
@@ -2270,7 +2349,7 @@ export default function LikharaEditor({
           className={`w-80 shrink-0 border-l border-zinc-800 bg-zinc-900/80 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
             mobilePanel === 'inspector'
               ? 'max-lg:translate-x-0'
-              : 'max-lg:translate-x-full'
+              : 'max-lg:translate-x-full max-lg:invisible max-lg:pointer-events-none'
           }`}
         >
           <div className="p-3 border-b border-zinc-800 bg-zinc-900 space-y-2">
@@ -2282,7 +2361,7 @@ export default function LikharaEditor({
                 </span>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-zinc-800 text-sky-300 border border-zinc-700">
+                <span className="px-1.5 py-0.5 rounded-md text-[11px] font-mono bg-zinc-800 text-sky-300 border border-zinc-700">
                   &lt;{selectedNode.tag}&gt;
                 </span>
                 <button
@@ -2296,9 +2375,11 @@ export default function LikharaEditor({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-zinc-950 border border-zinc-800">
+            <div role="tablist" aria-label="Inspector sections" className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-zinc-950 border border-zinc-800">
               <button
                 type="button"
+                role="tab"
+                aria-selected={inspectorTab === 'style'}
                 onClick={() => setInspectorTab('style')}
                 className={`py-1 rounded text-xs font-medium cursor-pointer ${
                   inspectorTab === 'style'
@@ -2310,6 +2391,8 @@ export default function LikharaEditor({
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={inspectorTab === 'semantics'}
                 onClick={() => setInspectorTab('semantics')}
                 className={`py-1 rounded text-xs font-medium cursor-pointer ${
                   inspectorTab === 'semantics'
@@ -2347,7 +2430,7 @@ export default function LikharaEditor({
               {inspectorTab === 'style' && (
                 <>
                   {/* MASTER ELEMENT OPACITY SLIDER (0% - 100%) */}
-                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/90 space-y-2">
+                  <div className="py-3 border-b border-zinc-800 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-medium text-zinc-300 flex items-center gap-1.5">
                         <Sun className="w-3.5 h-3.5 text-amber-400" />
@@ -2391,7 +2474,7 @@ export default function LikharaEditor({
                               `Set Opacity ${val}%`
                             )
                           }
-                          className={`py-1 rounded text-[10px] font-mono border cursor-pointer ${
+                          className={`py-1 rounded text-[11px] font-mono border cursor-pointer ${
                             selectedNode.style.opacity === val
                               ? 'bg-sky-500/25 border-sky-500 text-white'
                               : 'bg-zinc-900 border-zinc-800 text-zinc-400'
@@ -2456,14 +2539,14 @@ export default function LikharaEditor({
                   />
 
                   {/* DIMENSIONS, PADDING, GAP & RADIUS */}
-                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/90 space-y-3">
+                  <div className="py-3 border-b border-zinc-800 space-y-3">
                     <span className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
                       Dimensions &amp; Box Model
                     </span>
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Width
                         </label>
                         <input
@@ -2479,7 +2562,7 @@ export default function LikharaEditor({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Height
                         </label>
                         <input
@@ -2507,7 +2590,7 @@ export default function LikharaEditor({
                               `Set Width ${w}`
                             )
                           }
-                          className={`py-1 rounded text-[10px] font-mono border cursor-pointer ${
+                          className={`py-1 rounded text-[11px] font-mono border cursor-pointer ${
                             selectedNode.style.width === w
                               ? 'bg-sky-500/25 border-sky-500 text-white'
                               : 'bg-zinc-900 border-zinc-800 text-zinc-400'
@@ -2658,11 +2741,54 @@ export default function LikharaEditor({
                         className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-sky-500 bg-zinc-800"
                       />
                     </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-zinc-400 mb-1">
+                          Shadow
+                        </label>
+                        <select
+                          aria-label="Box shadow"
+                          value={selectedNode.style.shadow}
+                          onChange={(e) =>
+                            updateSelectedStyleDiscrete(
+                              { shadow: e.target.value as ShadowToken },
+                              `Set Shadow ${e.target.value}`
+                            )
+                          }
+                          className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-200"
+                        >
+                          {(['none', 'sm', 'md', 'lg', 'xl', '2xl'] as ShadowToken[]).map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-zinc-400 mb-1">
+                          Backdrop Blur
+                        </label>
+                        <select
+                          aria-label="Backdrop blur"
+                          value={selectedNode.style.backdropBlur}
+                          onChange={(e) =>
+                            updateSelectedStyleDiscrete(
+                              { backdropBlur: e.target.value as BlurToken },
+                              `Set Blur ${e.target.value}`
+                            )
+                          }
+                          className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-200"
+                        >
+                          {(['none', 'sm', 'md', 'lg', 'xl'] as BlurToken[]).map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   {/* CONTAINER FLEX/GRID CONTROLS */}
                   {selectedNode.isContainer && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/90 space-y-2.5">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
                       <span className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
                         Container Layout
                       </span>
@@ -2704,7 +2830,7 @@ export default function LikharaEditor({
                                   `Set Layout ${preset.label}`
                                 )
                               }
-                              className={`py-1.5 rounded text-[10px] font-mono border cursor-pointer ${
+                              className={`py-1.5 rounded text-[11px] font-mono border cursor-pointer ${
                                 active
                                   ? 'bg-sky-500/25 border-sky-500 text-white'
                                   : 'bg-zinc-900 border-zinc-800 text-zinc-400'
@@ -2715,12 +2841,56 @@ export default function LikharaEditor({
                           );
                         })}
                       </div>
+                      {selectedNode.style.display === 'flex' && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <div>
+                            <label className="block text-[11px] text-zinc-400 mb-1">
+                              Justify
+                            </label>
+                            <select
+                              aria-label="Flex justify content"
+                              value={selectedNode.style.justifyContent}
+                              onChange={(e) =>
+                                updateSelectedStyleDiscrete(
+                                  { justifyContent: e.target.value as JustifyMode },
+                                  `Set Justify ${e.target.value}`
+                                )
+                              }
+                              className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-200"
+                            >
+                              {(['start', 'center', 'end', 'between'] as JustifyMode[]).map((j) => (
+                                <option key={j} value={j}>{j}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-zinc-400 mb-1">
+                              Align
+                            </label>
+                            <select
+                              aria-label="Flex align items"
+                              value={selectedNode.style.alignItems}
+                              onChange={(e) =>
+                                updateSelectedStyleDiscrete(
+                                  { alignItems: e.target.value as AlignMode },
+                                  `Set Align ${e.target.value}`
+                                )
+                              }
+                              className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-200"
+                            >
+                              {(['start', 'center', 'end', 'stretch'] as AlignMode[]).map((a) => (
+                                <option key={a} value={a}>{a}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
                   {/* TYPOGRAPHY */}
                   {selectedNode.tag !== 'hr' && selectedNode.tag !== 'img' && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/90 space-y-2.5">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
                       <span className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
                         Typography
                       </span>
@@ -2746,7 +2916,7 @@ export default function LikharaEditor({
                                 `Font Size ${fs}`
                               )
                             }
-                            className={`py-1 rounded text-[10px] font-mono border cursor-pointer ${
+                            className={`py-1 rounded text-[11px] font-mono border cursor-pointer ${
                               selectedNode.style.fontSize === fs
                                 ? 'bg-sky-500/25 border-sky-500 text-white'
                                 : 'bg-zinc-900 border-zinc-800 text-zinc-400'
@@ -2775,13 +2945,34 @@ export default function LikharaEditor({
                                 `Font Weight ${fw}`
                               )
                             }
-                            className={`py-1 rounded text-[10px] font-mono border cursor-pointer ${
+                            className={`py-1 rounded text-[11px] font-mono border cursor-pointer ${
                               selectedNode.style.fontWeight === fw
                                 ? 'bg-sky-500/25 border-sky-500 text-white'
                                 : 'bg-zinc-900 border-zinc-800 text-zinc-400'
                             }`}
                           >
                             {fw}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {(['left', 'center', 'right'] as const).map((align) => (
+                          <button
+                            key={align}
+                            type="button"
+                            onClick={() =>
+                              updateSelectedStyleDiscrete(
+                                { textAlign: align },
+                                `Text Align ${align}`
+                              )
+                            }
+                            className={`py-1 rounded text-[11px] font-mono capitalize border cursor-pointer ${
+                              selectedNode.style.textAlign === align
+                                ? 'bg-sky-500/25 border-sky-500 text-white'
+                                : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {align}
                           </button>
                         ))}
                       </div>
@@ -2796,9 +2987,9 @@ export default function LikharaEditor({
               {inspectorTab === 'semantics' && (
                 <div className="space-y-3.5">
                   {/* Layer Name & HTML Tag */}
-                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
+                  <div className="py-3 border-b border-zinc-800 space-y-2.5">
                     <div>
-                      <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                      <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                         Layer Name
                       </label>
                       <input
@@ -2818,7 +3009,7 @@ export default function LikharaEditor({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                      <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                         Semantic HTML Tag
                       </label>
                       <select
@@ -2842,7 +3033,7 @@ export default function LikharaEditor({
 
                     {selectedNode.id !== 'root' && parentIdOfSelected && (
                       <div>
-                        <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                        <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                           Parent Container (Move / Reparent)
                         </label>
                         <select
@@ -2881,7 +3072,7 @@ export default function LikharaEditor({
                     selectedNode.tag !== 'img' &&
                     selectedNode.tag !== 'hr' && (
                       <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-1.5">
-                        <label className="block text-[10px] font-mono uppercase text-zinc-400">
+                        <label className="block text-[11px] font-mono uppercase text-zinc-400">
                           Text Content
                         </label>
                         <textarea
@@ -2903,12 +3094,12 @@ export default function LikharaEditor({
 
                   {/* Anchor Link Semantics */}
                   {selectedNode.tag === 'a' && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
-                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
+                      <span className="block text-[11px] font-mono uppercase text-sky-400">
                         Link Semantics (&lt;a&gt;)
                       </span>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Destination URL (href)
                         </label>
                         <input
@@ -2927,7 +3118,7 @@ export default function LikharaEditor({
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                         />
                         {selectedNode.href && !isSafeUrl(selectedNode.href) && (
-                          <p className="mt-1 text-[10px] text-rose-400">
+                          <p className="mt-1 text-[11px] text-rose-400">
                             Unsafe URL scheme blocked (use https://, http://, /, #, mailto:, or tel:).
                           </p>
                         )}
@@ -2953,12 +3144,12 @@ export default function LikharaEditor({
 
                   {/* Button Action Semantics */}
                   {selectedNode.tag === 'button' && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
-                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
+                      <span className="block text-[11px] font-mono uppercase text-sky-400">
                         Button Action Behavior
                       </span>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Action Type
                         </label>
                         <select
@@ -2986,7 +3177,7 @@ export default function LikharaEditor({
                       {(selectedNode.actionType === 'navigate' ||
                         selectedNode.actionType === 'custom-event') && (
                         <div>
-                          <label className="block text-[10px] text-zinc-400 mb-1">
+                          <label className="block text-[11px] text-zinc-400 mb-1">
                             {selectedNode.actionType === 'navigate'
                               ? 'Destination URL'
                               : 'Custom Event Name'}
@@ -3015,7 +3206,7 @@ export default function LikharaEditor({
                           {selectedNode.actionType === 'navigate' &&
                             selectedNode.actionTarget &&
                             !isSafeUrl(selectedNode.actionTarget) && (
-                              <p className="mt-1 text-[10px] text-rose-400">
+                              <p className="mt-1 text-[11px] text-rose-400">
                                 Unsafe navigation URL scheme blocked.
                               </p>
                             )}
@@ -3039,12 +3230,12 @@ export default function LikharaEditor({
 
                   {/* Form Container Semantics */}
                   {selectedNode.tag === 'form' && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
-                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
+                      <span className="block text-[11px] font-mono uppercase text-sky-400">
                         Form Submission &amp; Validation (&lt;form&gt;)
                       </span>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Endpoint Action URL (optional)
                         </label>
                         <input
@@ -3063,13 +3254,13 @@ export default function LikharaEditor({
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                         />
                         {selectedNode.formAction && !isSafeUrl(selectedNode.formAction) && (
-                          <p className="mt-1 text-[10px] text-rose-400">
+                          <p className="mt-1 text-[11px] text-rose-400">
                             Unsafe form action URL blocked.
                           </p>
                         )}
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           HTTP Method
                         </label>
                         <select
@@ -3091,7 +3282,7 @@ export default function LikharaEditor({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Validation Success Feedback
                         </label>
                         <input
@@ -3118,13 +3309,13 @@ export default function LikharaEditor({
                   {/* Form Input / Textarea Semantics */}
                   {(selectedNode.tag === 'input' ||
                     selectedNode.tag === 'textarea') && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
-                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
+                      <span className="block text-[11px] font-mono uppercase text-sky-400">
                         Form Control Attributes
                       </span>
                       {selectedNode.tag === 'input' && (
                         <div>
-                          <label className="block text-[10px] text-zinc-400 mb-1">
+                          <label className="block text-[11px] text-zinc-400 mb-1">
                             Input Type
                           </label>
                           <select
@@ -3152,7 +3343,7 @@ export default function LikharaEditor({
                         </div>
                       )}
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Visible Field Label
                         </label>
                         <input
@@ -3172,7 +3363,7 @@ export default function LikharaEditor({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Field Name (`name`)
                         </label>
                         <input
@@ -3194,7 +3385,7 @@ export default function LikharaEditor({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Placeholder
                         </label>
                         <input
@@ -3215,7 +3406,7 @@ export default function LikharaEditor({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Default Value
                         </label>
                         <input
@@ -3237,7 +3428,7 @@ export default function LikharaEditor({
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-[10px] text-zinc-400 mb-1">
+                          <label className="block text-[11px] text-zinc-400 mb-1">
                             Min Length
                           </label>
                           <input
@@ -3262,7 +3453,7 @@ export default function LikharaEditor({
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] text-zinc-400 mb-1">
+                          <label className="block text-[11px] text-zinc-400 mb-1">
                             Max Length
                           </label>
                           <input
@@ -3333,12 +3524,12 @@ export default function LikharaEditor({
 
                   {/* Image Semantics */}
                   {selectedNode.tag === 'img' && (
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
-                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                    <div className="py-3 border-b border-zinc-800 space-y-2.5">
+                      <span className="block text-[11px] font-mono uppercase text-sky-400">
                         Image Attributes (&lt;img&gt;)
                       </span>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Image Source URL (`src`)
                         </label>
                         <input
@@ -3356,7 +3547,7 @@ export default function LikharaEditor({
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                         />
                         {selectedNode.src && !isSafeUrl(selectedNode.src, true) && (
-                          <p className="mt-1 text-[10px] text-rose-400">
+                          <p className="mt-1 text-[11px] text-rose-400">
                             Unsafe image URL protocol rejected.
                           </p>
                         )}
@@ -3401,13 +3592,13 @@ export default function LikharaEditor({
                           Upload Local Image (≤ 512 KB)
                         </button>
                         {imageUploadError && (
-                          <p role="alert" className="mt-1 text-[10px] text-rose-400">
+                          <p role="alert" className="mt-1 text-[11px] text-rose-400">
                             {imageUploadError}
                           </p>
                         )}
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Object Fit
                         </label>
                         <select
@@ -3431,7 +3622,7 @@ export default function LikharaEditor({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[10px] text-zinc-400 mb-1">
+                        <label className="block text-[11px] text-zinc-400 mb-1">
                           Alt Text (`alt`)
                         </label>
                         <input
@@ -3454,9 +3645,9 @@ export default function LikharaEditor({
                   )}
 
                   {/* Accessibility & Custom Tailwind Utilities */}
-                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
+                  <div className="py-3 border-b border-zinc-800 space-y-2.5">
                     <div>
-                      <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                      <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                         Accessible Label (`aria-label`)
                       </label>
                       <input
@@ -3476,7 +3667,7 @@ export default function LikharaEditor({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                      <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                         Custom Tailwind Classes
                       </label>
                       <input
@@ -3501,7 +3692,7 @@ export default function LikharaEditor({
                   {/* Selected Node Export Diagnostics */}
                   {selectedNodeDiagnostics.length > 0 && (
                     <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-500/40 space-y-1">
-                      <span className="block text-[10px] font-mono uppercase text-amber-300">
+                      <span className="block text-[11px] font-mono uppercase text-amber-300">
                         Export Fidelity Diagnostics
                       </span>
                       {selectedNodeDiagnostics.map((d, i) => (

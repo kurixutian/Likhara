@@ -143,7 +143,7 @@ if (!exportedHtml.includes('<!DOCTYPE html>') || !exportedHtml.includes('data-li
 
 const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(exportedHtml);
 await send('Page.navigate', { url: dataUrl });
-await wait(800);
+await wait(1200);
 const htmlSubmitText = await evalJs(`
   (() => {
     const form = document.querySelector('form');
