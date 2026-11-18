@@ -297,10 +297,26 @@ export function hexToRgba(hex: string, alphaPercent: number): string {
   return `rgba(${r}, ${g}, ${b}, ${roundedAlpha})`;
 }
 
+export function downloadFile(
+  filename: string,
+  content: string,
+  mime = 'application/json'
+): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Formats a Tailwind alpha modifier suffix (e.g., '/80' or '').
  */
-export function alphaToTailwindModifier(alphaPercent: number): string {
+function alphaToTailwindModifier(alphaPercent: number): string {
   const clamped = Math.round(Math.max(0, Math.min(100, alphaPercent)));
   if (clamped >= 100) return '';
   return `/${clamped}`;
@@ -445,7 +461,7 @@ export function stylesToInlineCSS(node: UINode): CSSProperties {
 /**
  * Compiles a node's visual style tokens into clean Tailwind CSS classes.
  */
-export function stylesToTailwindClasses(node: UINode): string {
+function stylesToTailwindClasses(node: UINode): string {
   const s = node.style;
   const cls: string[] = [];
 
@@ -566,7 +582,7 @@ export function stylesToTailwindClasses(node: UINode): string {
   return cls.join(' ');
 }
 
-export function escapeJSXText(raw = ''): string {
+function escapeJSXText(raw = ''): string {
   return raw
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -575,7 +591,7 @@ export function escapeJSXText(raw = ''): string {
     .replace(/\}/g, '&#125;');
 }
 
-export function escapeHTMLAttr(raw = ''): string {
+function escapeHTMLAttr(raw = ''): string {
   return raw
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
@@ -605,7 +621,7 @@ export function findParentId(root: UINode, targetId: string): string | null {
   return null;
 }
 
-export function isDescendantOrSelf(
+function isDescendantOrSelf(
   root: UINode,
   candidateAncestorId: string,
   targetId: string
@@ -1350,8 +1366,9 @@ export function collectExportDiagnostics(root: UINode): ExportDiagnostic[] {
   return diagnostics;
 }
 
-function buildSemanticAttributesJSX(node: UINode): string {
+function buildSemanticAttributes(node: UINode, mode: 'jsx' | 'html'): string {
   const attrs: string[] = [];
+  const isJsx = mode === 'jsx';
 
   if (node.ariaLabel && node.ariaLabel.trim()) {
     attrs.push(`aria-label="${escapeHTMLAttr(node.ariaLabel.trim())}"`);
@@ -1373,56 +1390,45 @@ function buildSemanticAttributesJSX(node: UINode): string {
     if (node.actionType === 'navigate' && node.actionTarget?.trim()) {
       const rawUrl = node.actionTarget.trim();
       const targetUrl = isSafeUrl(rawUrl) ? rawUrl : '#';
-      attrs.push(`onClick={() => { window.location.href = ${JSON.stringify(targetUrl)}; }}`);
+      attrs.push(
+        isJsx
+          ? `onClick={() => { window.location.href = ${JSON.stringify(targetUrl)}; }}`
+          : `data-action="navigate" data-target="${escapeHTMLAttr(targetUrl)}"`
+      );
     } else if (node.actionType === 'custom-event' && node.actionTarget?.trim()) {
       const evtName = node.actionTarget.trim();
       attrs.push(
-        `onClick={() => { window.dispatchEvent(new CustomEvent(${JSON.stringify(evtName)})); }}`
+        isJsx
+          ? `onClick={() => { window.dispatchEvent(new CustomEvent(${JSON.stringify(evtName)})); }}`
+          : `data-action="custom-event" data-event="${escapeHTMLAttr(evtName)}"`
       );
     }
   }
 
-  if (node.tag === 'input') {
-    attrs.push(`type="${escapeHTMLAttr(node.inputType || 'text')}"`);
+  if (node.tag === 'input' || node.tag === 'textarea') {
+    if (node.tag === 'input') {
+      attrs.push(`type="${escapeHTMLAttr(node.inputType || 'text')}"`);
+    }
     if (node.nameAttr?.trim()) {
       attrs.push(`name="${escapeHTMLAttr(node.nameAttr.trim())}"`);
     }
     if (node.placeholder?.trim()) {
       attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
     }
-    if (node.defaultValue !== undefined && node.defaultValue !== '') {
+    if (node.tag === 'input' && node.defaultValue !== undefined && node.defaultValue !== '') {
+      attrs.push(`${isJsx ? 'defaultValue' : 'value'}="${escapeHTMLAttr(node.defaultValue)}"`);
+    } else if (isJsx && node.tag === 'textarea' && node.defaultValue !== undefined && node.defaultValue !== '') {
       attrs.push(`defaultValue="${escapeHTMLAttr(node.defaultValue)}"`);
     }
     if (typeof node.minLength === 'number') {
-      attrs.push(`minLength={${node.minLength}}`);
+      attrs.push(isJsx ? `minLength={${node.minLength}}` : `minlength="${node.minLength}"`);
     }
     if (typeof node.maxLength === 'number') {
-      attrs.push(`maxLength={${node.maxLength}}`);
+      attrs.push(isJsx ? `maxLength={${node.maxLength}}` : `maxlength="${node.maxLength}"`);
     }
     if (node.required) attrs.push('required');
     if (node.disabled) attrs.push('disabled');
-    if (node.readOnly) attrs.push('readOnly');
-  }
-
-  if (node.tag === 'textarea') {
-    if (node.nameAttr?.trim()) {
-      attrs.push(`name="${escapeHTMLAttr(node.nameAttr.trim())}"`);
-    }
-    if (node.placeholder?.trim()) {
-      attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
-    }
-    if (node.defaultValue !== undefined && node.defaultValue !== '') {
-      attrs.push(`defaultValue="${escapeHTMLAttr(node.defaultValue)}"`);
-    }
-    if (typeof node.minLength === 'number') {
-      attrs.push(`minLength={${node.minLength}}`);
-    }
-    if (typeof node.maxLength === 'number') {
-      attrs.push(`maxLength={${node.maxLength}}`);
-    }
-    if (node.required) attrs.push('required');
-    if (node.disabled) attrs.push('disabled');
-    if (node.readOnly) attrs.push('readOnly');
+    if (node.readOnly) attrs.push(isJsx ? 'readOnly' : 'readonly');
   }
 
   if (node.tag === 'img') {
@@ -1440,102 +1446,9 @@ function buildSemanticAttributesJSX(node: UINode): string {
       attrs.push(`action="${escapeHTMLAttr(node.formAction.trim())}"`);
       attrs.push(`method="${node.formMethod || 'POST'}"`);
     }
-    attrs.push('onSubmit={(e) => { e.preventDefault(); }}');
-  }
-
-  return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
-}
-
-function buildSemanticAttributesHTML(node: UINode): string {
-  const attrs: string[] = [];
-
-  if (node.ariaLabel && node.ariaLabel.trim()) {
-    attrs.push(`aria-label="${escapeHTMLAttr(node.ariaLabel.trim())}"`);
-  }
-
-  if (node.tag === 'a') {
-    const rawHref = node.href?.trim() || '#';
-    const href = isSafeUrl(rawHref) ? rawHref : '#';
-    attrs.push(`href="${escapeHTMLAttr(href)}"`);
-    if (node.targetBlank) {
-      attrs.push('target="_blank"', 'rel="noopener noreferrer"');
-    }
-  }
-
-  if (node.tag === 'button') {
-    const btnType = node.actionType === 'submit' ? 'submit' : 'button';
-    attrs.push(`type="${btnType}"`);
-    if (node.disabled) attrs.push('disabled');
-    if (node.actionType === 'navigate' && node.actionTarget?.trim()) {
-      const targetUrl = isSafeUrl(node.actionTarget.trim()) ? node.actionTarget.trim() : '#';
-      attrs.push(
-        `data-action="navigate" data-target="${escapeHTMLAttr(targetUrl)}"`
-      );
-    } else if (node.actionType === 'custom-event' && node.actionTarget?.trim()) {
-      attrs.push(
-        `data-action="custom-event" data-event="${escapeHTMLAttr(
-          node.actionTarget.trim()
-        )}"`
-      );
-    }
-  }
-
-  if (node.tag === 'input') {
-    attrs.push(`type="${escapeHTMLAttr(node.inputType || 'text')}"`);
-    if (node.nameAttr?.trim()) {
-      attrs.push(`name="${escapeHTMLAttr(node.nameAttr.trim())}"`);
-    }
-    if (node.placeholder?.trim()) {
-      attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
-    }
-    if (node.defaultValue !== undefined && node.defaultValue !== '') {
-      attrs.push(`value="${escapeHTMLAttr(node.defaultValue)}"`);
-    }
-    if (typeof node.minLength === 'number') {
-      attrs.push(`minlength="${node.minLength}"`);
-    }
-    if (typeof node.maxLength === 'number') {
-      attrs.push(`maxlength="${node.maxLength}"`);
-    }
-    if (node.required) attrs.push('required');
-    if (node.disabled) attrs.push('disabled');
-    if (node.readOnly) attrs.push('readonly');
-  }
-
-  if (node.tag === 'textarea') {
-    if (node.nameAttr?.trim()) {
-      attrs.push(`name="${escapeHTMLAttr(node.nameAttr.trim())}"`);
-    }
-    if (node.placeholder?.trim()) {
-      attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
-    }
-    if (typeof node.minLength === 'number') {
-      attrs.push(`minlength="${node.minLength}"`);
-    }
-    if (typeof node.maxLength === 'number') {
-      attrs.push(`maxlength="${node.maxLength}"`);
-    }
-    if (node.required) attrs.push('required');
-    if (node.disabled) attrs.push('disabled');
-    if (node.readOnly) attrs.push('readonly');
-  }
-
-  if (node.tag === 'img') {
-    const rawSrc = node.src?.trim() || '';
-    const safeSrc =
-      rawSrc && isSafeUrl(rawSrc, true)
-        ? rawSrc
-        : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
-    attrs.push(`src="${escapeHTMLAttr(safeSrc)}"`);
-    attrs.push(`alt="${escapeHTMLAttr(node.alt?.trim() || node.name)}"`);
-  }
-
-  if (node.tag === 'form') {
-    if (node.formAction?.trim() && isSafeUrl(node.formAction)) {
-      attrs.push(`action="${escapeHTMLAttr(node.formAction.trim())}"`);
-      attrs.push(`method="${node.formMethod || 'POST'}"`);
-    }
-    if (node.submitMessage?.trim()) {
+    if (isJsx) {
+      attrs.push('onSubmit={(e) => { e.preventDefault(); }}');
+    } else if (node.submitMessage?.trim()) {
       attrs.push(`data-submit-message="${escapeHTMLAttr(node.submitMessage.trim())}"`);
     }
   }
@@ -1543,12 +1456,12 @@ function buildSemanticAttributesHTML(node: UINode): string {
   return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
 }
 
-export function compileNodeToReactTailwind(node: UINode, depth = 2): string {
+function compileNodeToReactTailwind(node: UINode, depth = 2): string {
   if (node.hidden) return '';
   const indent = '  '.repeat(depth);
   const tw = stylesToTailwindClasses(node);
   const classAttr = tw ? ` className="${escapeHTMLAttr(tw)}"` : '';
-  const semAttrs = buildSemanticAttributesJSX(node);
+  const semAttrs = buildSemanticAttributes(node, 'jsx');
 
   if (node.tag === 'hr' || node.tag === 'input' || node.tag === 'img') {
     return `${indent}<${node.tag}${classAttr}${semAttrs} />`;
@@ -1585,12 +1498,12 @@ ${body}
 }`;
 }
 
-export function compileNodeToReactInline(node: UINode, depth = 2): string {
+function compileNodeToReactInline(node: UINode, depth = 2): string {
   if (node.hidden) return '';
   const indent = '  '.repeat(depth);
   const styleObj = stylesToInlineCSS(node);
   const styleAttr = ` style={${JSON.stringify(styleObj)}}`;
-  const semAttrs = buildSemanticAttributesJSX(node);
+  const semAttrs = buildSemanticAttributes(node, 'jsx');
 
   if (node.tag === 'hr' || node.tag === 'input' || node.tag === 'img') {
     return `${indent}<${node.tag}${styleAttr}${semAttrs} />`;
@@ -1628,7 +1541,7 @@ function camelToKebab(str: string): string {
   return str.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
 }
 
-export function compileNodeToHTML(node: UINode, depth = 2): string {
+function compileNodeToHTML(node: UINode, depth = 2): string {
   if (node.hidden) return '';
   const indent = '  '.repeat(depth);
   const tw = stylesToTailwindClasses(node);
@@ -1640,7 +1553,7 @@ export function compileNodeToHTML(node: UINode, depth = 2): string {
 
   const classAttr = tw ? ` class="${escapeHTMLAttr(tw)}"` : '';
   const styleAttr = cssStr ? ` style="${escapeHTMLAttr(cssStr)}"` : '';
-  const semAttrs = buildSemanticAttributesHTML(node);
+  const semAttrs = buildSemanticAttributes(node, 'html');
 
   if (node.tag === 'hr' || node.tag === 'input' || node.tag === 'img') {
     return `${indent}<${node.tag}${classAttr}${styleAttr}${semAttrs} />`;

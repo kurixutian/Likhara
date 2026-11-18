@@ -828,9 +828,12 @@ test results, and any known limitations. Do not start Phase 2.
 - Define color, typography, spacing, border, radius, focus, and elevation tokens.
 - Redesign home page.
 - Redesign editor shell and panel hierarchy.
-- Make phone behavior intentional.
+- Make phone behavior intentional; treat mobile editor usability as a first-class
+  Phase 2 deliverable, not a later QA-only task.
 - Preserve the canvas as the user's work surface.
 - Add meaningful empty, loading, saving, error, selected, and disabled states.
+- Replace the permanently visible desktop sidebars on phones with an
+  on-demand, canvas-first panel model.
 
 ### Detailed prompt
 
@@ -867,6 +870,32 @@ Design constraints:
 - The home page should prioritize recent projects and project creation.
 - On narrow screens, use a deliberate panel/drawer/tab strategy. Do not
   squeeze a desktop three-column layout into a phone width.
+- On phone-sized viewports, prioritize the canvas and hide the component
+  palette/layers panel and properties inspector by default.
+- Provide obvious, persistent mobile controls to open Components/Layers and
+  Properties. Never make a panel dismissible only through an undiscoverable
+  gesture.
+- Present mobile panels as drawers or bottom sheets (choose one coherent
+  pattern and document it); do not leave both desktop sidebars permanently
+  consuming canvas width.
+- Components and Layers must remain reachable through a clear switch or tab
+  within the component panel.
+- The properties inspector should open on demand for the selected node and be
+  dismissible without clearing or changing that selection.
+- Define panel coordination: avoid displaying both side panels simultaneously
+  on phone widths unless testing proves the canvas remains genuinely usable.
+- Keep the selected node, scroll position where practical, and unsaved editor
+  state intact when opening, switching, or closing panels.
+- Provide a compact mobile toolbar: retain the highest-frequency actions
+  (such as undo, redo, preview, and primary actions); move secondary actions
+  into a clearly labeled overflow menu rather than shrinking every control.
+- Ensure controls have touch-friendly hit areas and do not rely on hover.
+- Handle the on-screen keyboard: focused fields must remain visible, panels
+  must not cover essential input controls, and the editor must remain usable
+  when the keyboard opens and closes.
+- Keep the desktop layout and its established workflows intact; implement
+  responsive presentation and mobile interaction without rewriting the
+  editor, canvas, inspector, or tree architecture.
 - Respect reduced-motion preferences.
 
 Implement:
@@ -875,10 +904,25 @@ Implement:
 3. Editor shell and toolbar redesign.
 4. Palette/layers/inspector panel styling.
 5. Empty, loading, error, and save-status states.
-6. Responsive layouts.
+6. Responsive layouts, including a canvas-first mobile editor with
+   collapsible/on-demand panels and a compact mobile toolbar.
+7. Add clear panel toggles and panel open/close behavior without changing
+   editor selection or project data.
 
 Verification:
-- Capture desktop 1440x900 and phone 390x844 screenshots.
+- Capture desktop 1440x900 and phone 390x844 screenshots; also verify a
+  second phone viewport at 412x915.
+- On phone widths, verify the canvas is the primary visible work surface and
+  neither sidebar is permanently consuming the available width.
+- Verify Components/Layers can be opened, switched, and dismissed; verify
+  Properties can be opened for a selected node and dismissed without losing
+  selection.
+- Verify panel transitions preserve selection, editor contents, and save
+  state; verify panel coordination prevents unusable simultaneous sidebars.
+- Verify the compact toolbar exposes essential actions and secondary actions
+  remain discoverable in overflow.
+- Open the on-screen keyboard while editing a property; verify the field and
+  required actions remain visible and the layout recovers after keyboard close.
 - Check for horizontal overflow and clipped controls.
 - Keyboard-tab through every visible action.
 - Verify selected and focus states are distinguishable without color alone.
@@ -893,7 +937,10 @@ Stop after Phase 2 and report screenshots, changed files, and test results.
 
 - One documented design system is used consistently.
 - Home and editor are visually coherent.
-- Phone layout is usable.
+- Phone layout is usable and canvas-first; mobile users can deliberately
+  reveal and dismiss both side panels.
+- Mobile panel interactions preserve selection and editing state.
+- The mobile toolbar remains usable without hiding essential actions.
 - No visual regression hides or removes existing editor controls.
 
 ---

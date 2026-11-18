@@ -11,7 +11,7 @@ import {
   CheckCircle2,
   X,
 } from 'lucide-react';
-import type { LikharaProject } from './likhara/core';
+import { downloadFile, type LikharaProject } from './likhara/core';
 import {
   listProjects,
   getProject,
@@ -21,6 +21,7 @@ import {
 import {
   createProject,
   duplicateProject,
+  renameProject,
   parseProjectDocument,
 } from './likhara/projects/projectOps';
 import { runLegacyMigration } from './likhara/projects/migration';
@@ -41,19 +42,10 @@ function formatRelativeTime(iso: string): string {
 }
 
 function downloadProjectDoc(project: LikharaProject): void {
-  const blob = new Blob([JSON.stringify(project, null, 2)], {
-    type: 'application/json',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${project.name
+  const filename = `${project.name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-') || 'likhara-project'}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadFile(filename, JSON.stringify(project, null, 2));
 }
 
 export default function ProjectHome({
@@ -139,11 +131,7 @@ export default function ProjectHome({
     withBusy(async () => {
       const name = window.prompt('Rename project', project.name);
       if (name === null || !name.trim() || name.trim() === project.name) return;
-      const updated: LikharaProject = {
-        ...project,
-        name: name.trim(),
-        updatedAt: new Date().toISOString(),
-      };
+      const updated = renameProject(project, name);
       const save = await saveProjectRecord(updated);
       if (!save.ok) {
         setFeedback({ type: 'error', messages: [save.error] });

@@ -69,6 +69,7 @@ import {
   collectExportDiagnostics,
   validateExportedCode,
   isSafeUrl,
+  downloadFile,
   MAX_IMAGE_DATA_URL_BYTES,
   compileToReactTailwind,
   compileToReactInlineStyle,
@@ -897,15 +898,7 @@ export default function LikharaEditor({
   const handleDownloadCode = () => {
     const ext = codeFormat === 'html' ? 'html' : 'tsx';
     const mime = codeFormat === 'html' ? 'text/html' : 'text/typescript';
-    const blob = new Blob([compiledCode], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `LikharaExportedUI.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadFile(`LikharaExportedUI.${ext}`, compiledCode, mime);
   };
 
   const handleExportProjectJSON = () => {
@@ -922,19 +915,10 @@ export default function LikharaEditor({
       },
       root: liveRoot,
     };
-    const blob = new Blob([JSON.stringify(doc, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${projectMeta.name
+    const filename = `${projectMeta.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-') || 'likhara-project'}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadFile(filename, JSON.stringify(doc, null, 2));
   };
 
   const handleApplyValidatedImport = (rawJson: string) => {
@@ -2001,85 +1985,52 @@ export default function LikharaEditor({
                 </div>
               </div>
 
-              {/* Containers */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5 px-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                    Layout Containers
-                  </span>
-                  <span className="text-[11px] text-zinc-500">Drag or +</span>
-                </div>
-                <div className="space-y-1.5">
-                  {PALETTE_DEFINITIONS.filter(
-                    (d) => d.category === 'container'
-                  ).map((item) => (
-                    <div
-                      key={item.type}
-                      draggable
-                      onDragStart={(e) => handlePaletteDragStart(e, item.type)}
-                      onDragEnd={() => setDragState(null)}
-                      className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium text-zinc-200 truncate">
-                          {item.label}
-                        </div>
-                        <span className="block text-[11px] text-zinc-400 truncate">
-                          {item.description}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`Insert ${item.label}`}
-                        onClick={() => handleInsertPrimitive(item.type)}
-                        className="p-1.5 rounded bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white cursor-pointer shrink-0"
+              {/* Palette Categories */}
+              {(
+                [
+                  ['container', 'Layout Containers'],
+                  ['element', 'Semantic Elements'],
+                ] as const
+              ).map(([category, heading]) => (
+                <div key={category}>
+                  <div className="flex items-center justify-between mb-1.5 px-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                      {heading}
+                    </span>
+                    <span className="text-[11px] text-zinc-500">Drag or +</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {PALETTE_DEFINITIONS.filter(
+                      (d) => d.category === category
+                    ).map((item) => (
+                      <div
+                        key={item.type}
+                        draggable
+                        onDragStart={(e) => handlePaletteDragStart(e, item.type)}
+                        onDragEnd={() => setDragState(null)}
+                        className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
                       >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Semantic Elements */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5 px-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                    Semantic Elements
-                  </span>
-                  <span className="text-[11px] text-zinc-500">Drag or +</span>
-                </div>
-                <div className="space-y-1.5">
-                  {PALETTE_DEFINITIONS.filter(
-                    (d) => d.category === 'element'
-                  ).map((item) => (
-                    <div
-                      key={item.type}
-                      draggable
-                      onDragStart={(e) => handlePaletteDragStart(e, item.type)}
-                      onDragEnd={() => setDragState(null)}
-                      className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium text-zinc-200 truncate">
-                          {item.label}
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-zinc-200 truncate">
+                            {item.label}
+                          </div>
+                          <span className="block text-[11px] text-zinc-400 truncate">
+                            {item.description}
+                          </span>
                         </div>
-                        <span className="block text-[11px] text-zinc-400 truncate">
-                          {item.description}
-                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Insert ${item.label}`}
+                          onClick={() => handleInsertPrimitive(item.type)}
+                          className="p-1.5 rounded bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white cursor-pointer shrink-0"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        aria-label={`Insert ${item.label}`}
-                        onClick={() => handleInsertPrimitive(item.type)}
-                        className="p-1.5 rounded bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white cursor-pointer shrink-0"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           )}
 
