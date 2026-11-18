@@ -1,1 +1,84 @@
 @import "tailwindcss";
+
+/* ============================================================================
+   LIKHARA DESIGN TOKENS (Phase 2) — see docs/DESIGN_BRIEF.md
+   Radius scale is deliberate: no arbitrary radii in editor chrome.
+   ============================================================================ */
+@theme {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono",
+    Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply antialiased;
+  }
+
+  /* Keyboard focus is always visible and distinct from selection. */
+  :focus-visible {
+    outline: 2px solid var(--color-sky-400);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-sky-500) 45%, transparent);
+  }
+
+  /* Themed browser surfaces (craft floor): thin, chrome-tinted scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-zinc-700) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-zinc-700);
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Touch pointers: text-entry fields render at 16px so focusing them never
+   triggers mobile focus-zoom; compact 12px UI remains for labels/buttons. */
+@media (pointer: coarse) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  input[type="url"],
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Respect reduced-motion preferences everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

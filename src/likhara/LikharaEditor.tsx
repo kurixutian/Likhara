@@ -42,6 +42,7 @@ import {
   Droplets,
   CheckCircle2,
   AlertTriangle,
+  MoreHorizontal,
   FileJson,
   ShieldCheck,
   X,
@@ -341,6 +342,13 @@ export default function LikharaEditor({
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importJsonText, setImportJsonText] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+
+  // Mobile shell state (< 1024px): canvas-first drawers, one side panel at a
+  // time. Purely presentational — selection and project data are untouched.
+  const [mobilePanel, setMobilePanel] = useState<
+    'none' | 'left' | 'inspector'
+  >('none');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1263,11 +1271,11 @@ export default function LikharaEditor({
   };
 
   return (
-    <div className="min-h-screen h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden font-sans select-none">
+    <div className="h-[100dvh] bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden font-sans select-none">
       {/* ====================================================================
           TOP OPERATIONAL WORKSPACE BAR (LIKHARA STUDIO)
          ==================================================================== */}
-      <header className="h-13 shrink-0 border-b border-zinc-800 bg-zinc-900 px-3 flex items-center justify-between gap-2">
+      <header className="h-13 shrink-0 border-b border-zinc-800 bg-zinc-900 px-2 sm:px-3 flex items-center justify-between gap-2 relative">
         {/* Left: Brand Identity + Project Name + Save/Migration Status */}
         <div className="flex items-center gap-2.5 min-w-0">
           <button
@@ -1279,12 +1287,12 @@ export default function LikharaEditor({
           >
             <Home className="w-4 h-4" />
           </button>
-          <div className="w-8 h-8 rounded-lg bg-sky-600 flex items-center justify-center text-white font-bold text-xs tracking-wider shrink-0">
+          <div className="w-7 h-7 rounded-md bg-sky-600 flex items-center justify-center text-white font-bold text-[10px] tracking-wider shrink-0">
             LK
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold tracking-tight text-zinc-100">
+              <span className="hidden lg:inline text-xs font-semibold tracking-tight text-zinc-100">
                 Likhara Studio
               </span>
               <input
@@ -1297,11 +1305,11 @@ export default function LikharaEditor({
                     name: e.target.value,
                   }))
                 }
-                className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-medium focus:outline-none focus:border-sky-500 w-36 sm:w-44"
+                className="px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-medium focus:outline-none focus:border-sky-500 w-24 shrink-0 sm:w-44"
               />
               <span
                 title={saveErrorMsg || 'Local persistence status'}
-                className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono border shrink-0 ${
                   saveStatus === 'saved'
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                     : saveStatus === 'saving'
@@ -1349,7 +1357,7 @@ export default function LikharaEditor({
             </button>
           </div>
 
-          <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
+          <div className="hidden lg:flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
             <button
               type="button"
               onClick={() => setWorkspaceMode('design')}
@@ -1392,7 +1400,8 @@ export default function LikharaEditor({
           </div>
         </div>
 
-        {/* Right: Project Import / Export / Reset */}
+        {/* Right: Project Import / Export / Reset (desktop) + mobile panel
+            toggles & overflow menu */}
         <div className="flex items-center gap-1.5">
           <input
             ref={fileInputRef}
@@ -1401,38 +1410,218 @@ export default function LikharaEditor({
             onChange={handleFileUploadImport}
             className="hidden"
           />
-          <button
-            type="button"
-            onClick={() => setShowImportModal(true)}
-            title="Import & Validate Project JSON"
-            className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <Upload className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden lg:inline">Import JSON</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleExportProjectJSON}
-            title="Export Likhara Project JSON"
-            className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <FileJson className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden lg:inline">Save JSON</span>
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              commitTree(
-                DEFAULT_LIKHARA_STARTER_TREE,
-                'likhara-hero-card',
-                'Reset to Starter Template'
-              )
-            }
-            title="Reset to Starter Template"
-            className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+          <div className="hidden lg:flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowImportModal(true)}
+              title="Import & Validate Project JSON"
+              className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-sky-400" />
+              <span className="hidden xl:inline">Import JSON</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportProjectJSON}
+              title="Export Likhara Project JSON"
+              className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <FileJson className="w-3.5 h-3.5 text-sky-400" />
+              <span className="hidden xl:inline">Save JSON</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                commitTree(
+                  DEFAULT_LIKHARA_STARTER_TREE,
+                  'likhara-hero-card',
+                  'Reset to Starter Template'
+                )
+              }
+              title="Reset to Starter Template"
+              className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Mobile (< 1024px): canvas-first panel toggles + overflow menu */}
+          <div className="flex lg:hidden items-center gap-1">
+            <button
+              type="button"
+              aria-label="Toggle Components panel"
+              aria-expanded={mobilePanel === 'left'}
+              onClick={() =>
+                setMobilePanel(mobilePanel === 'left' ? 'none' : 'left')
+              }
+              className={`p-2 rounded-md border text-xs flex items-center cursor-pointer ${
+                mobilePanel === 'left'
+                  ? 'bg-sky-600 border-sky-500 text-white font-medium'
+                  : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+              }`}
+            >
+              <Box className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Toggle Properties panel"
+              aria-expanded={mobilePanel === 'inspector'}
+              onClick={() =>
+                setMobilePanel(mobilePanel === 'inspector' ? 'none' : 'inspector')
+              }
+              className={`p-2 rounded-md border text-xs flex items-center cursor-pointer ${
+                mobilePanel === 'inspector'
+                  ? 'bg-sky-600 border-sky-500 text-white font-medium'
+                  : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="More actions"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className={`p-2 rounded-md border text-xs flex items-center cursor-pointer ${
+                mobileMenuOpen
+                  ? 'bg-zinc-800 border-zinc-700 text-white'
+                  : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+              }`}
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+          </div>
+
+          {mobileMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                aria-hidden="true"
+                onClick={() => setMobileMenuOpen(false)}
+              />
+              <div
+                role="menu"
+                aria-label="More actions"
+                className="absolute right-2 top-12 z-50 w-60 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/50 py-1.5 max-lg:mr-1"
+              >
+                <p className="px-3 pt-1 pb-1.5 text-[10px] font-mono uppercase tracking-wide text-zinc-500">
+                  Workspace Mode
+                </p>
+                <div className="flex gap-1 px-2 pb-1">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setWorkspaceMode('design')}
+                    className={`flex-1 px-2 py-2 rounded-md text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                      workspaceMode === 'design'
+                        ? 'bg-sky-600 text-white font-medium'
+                        : 'bg-zinc-950 text-zinc-300 border border-zinc-800'
+                    }`}
+                  >
+                    <PenTool className="w-3.5 h-3.5" />
+                    Design
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setWorkspaceMode('split')}
+                    className={`flex-1 px-2 py-2 rounded-md text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                      workspaceMode === 'split'
+                        ? 'bg-sky-600 text-white font-medium'
+                        : 'bg-zinc-950 text-zinc-300 border border-zinc-800'
+                    }`}
+                  >
+                    <Columns className="w-3.5 h-3.5" />
+                    Split
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setWorkspaceMode('preview');
+                      setPreviewFeedback(null);
+                    }}
+                    className={`flex-1 px-2 py-2 rounded-md text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                      workspaceMode === 'preview'
+                        ? 'bg-emerald-600 text-white font-medium'
+                        : 'bg-zinc-950 text-zinc-300 border border-zinc-800'
+                    }`}
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Preview
+                  </button>
+                </div>
+                <p className="px-3 pt-2 pb-1.5 text-[10px] font-mono uppercase tracking-wide text-zinc-500">
+                  Preview Viewport
+                </p>
+                <div className="flex gap-1 px-2 pb-1.5">
+                  {(
+                    [
+                      ['desktop', 'Desktop', Monitor],
+                      ['tablet', 'Tablet', Tablet],
+                      ['mobile', 'Phone', Smartphone],
+                    ] as const
+                  ).map(([mode, label, Icon]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setViewportMode(mode)}
+                      className={`flex-1 px-2 py-2 rounded-md text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                        viewportMode === mode
+                          ? 'bg-zinc-800 text-sky-400 border border-zinc-700'
+                          : 'bg-zinc-950 text-zinc-300 border border-zinc-800'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="my-1 border-t border-zinc-800" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setShowImportModal(true);
+                  }}
+                  className="w-full text-left px-3 py-2.5 text-xs flex items-center gap-2.5 hover:bg-zinc-800 text-zinc-200 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-sky-400" />
+                  Import JSON…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleExportProjectJSON();
+                  }}
+                  className="w-full text-left px-3 py-2.5 text-xs flex items-center gap-2.5 hover:bg-zinc-800 text-zinc-200 cursor-pointer"
+                >
+                  <FileJson className="w-3.5 h-3.5 text-sky-400" />
+                  Save JSON
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    commitTree(
+                      DEFAULT_LIKHARA_STARTER_TREE,
+                      'likhara-hero-card',
+                      'Reset to Starter Template'
+                    );
+                  }}
+                  className="w-full text-left px-3 py-2.5 text-xs flex items-center gap-2.5 hover:bg-zinc-800 text-zinc-200 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
+                  Reset to Starter
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -1517,14 +1706,29 @@ export default function LikharaEditor({
       )}
 
       {/* ====================================================================
-          MAIN 3-COLUMN STUDIO BODY
+          MAIN 3-COLUMN STUDIO BODY (drawers below 1024px, one at a time)
          ==================================================================== */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Scrim behind an open mobile drawer */}
+        {mobilePanel !== 'none' && (
+          <div
+            className="hidden max-lg:block absolute inset-0 z-30 bg-black/60"
+            aria-hidden="true"
+            onClick={() => setMobilePanel('none')}
+          />
+        )}
         {/* ------------------------------------------------------------------
             LEFT SIDEBAR: COMPONENT PALETTE & DOM LAYER TREE
            ------------------------------------------------------------------ */}
-        <aside className="w-64 shrink-0 border-r border-zinc-800 bg-zinc-900/70 flex flex-col overflow-hidden">
-          <div className="grid grid-cols-2 p-2 gap-1 border-b border-zinc-800 bg-zinc-900">
+        <aside
+          className={`w-64 shrink-0 border-r border-zinc-800 bg-zinc-900/70 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
+            mobilePanel === 'left'
+              ? 'max-lg:translate-x-0'
+              : 'max-lg:-translate-x-full'
+          }`}
+        >
+          <div className="flex items-stretch border-b border-zinc-800 bg-zinc-900">
+            <div className="grid grid-cols-2 flex-1 p-2 gap-1 min-w-0">
             <button
               type="button"
               onClick={() => setLeftTab('palette')}
@@ -1548,6 +1752,15 @@ export default function LikharaEditor({
             >
               <Layers className="w-3.5 h-3.5 text-sky-400" />
               Layers ({totalNodes})
+            </button>
+            </div>
+            <button
+              type="button"
+              aria-label="Close panel"
+              onClick={() => setMobilePanel('none')}
+              className="hidden max-lg:flex items-center px-3 border-l border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
             </button>
           </div>
 
@@ -1670,7 +1883,7 @@ export default function LikharaEditor({
            ------------------------------------------------------------------ */}
         <main className="flex-1 flex flex-col overflow-hidden bg-zinc-950">
           {/* Canvas Toolbar */}
-          <div className="h-9 shrink-0 px-3 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between text-xs">
+          <div className="h-9 shrink-0 px-3 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between gap-3 text-xs max-lg:overflow-x-auto max-lg:whitespace-nowrap max-lg:[&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <div className="flex items-center gap-2 truncate">
               <span className="font-mono text-[11px] text-sky-400">
                 Selection:
@@ -1684,7 +1897,7 @@ export default function LikharaEditor({
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 aria-label="Toggle canvas grid"
@@ -1720,7 +1933,7 @@ export default function LikharaEditor({
                 </button>
               </div>
 
-              <div className="flex items-center gap-0.5 bg-zinc-900 border border-zinc-800 rounded p-0.5">
+              <div className="hidden lg:flex items-center gap-0.5 bg-zinc-900 border border-zinc-800 rounded p-0.5">
                 <button
                   type="button"
                   aria-label="Desktop viewport"
@@ -1806,8 +2019,8 @@ export default function LikharaEditor({
           {/* Live Code Compiler & Diagnostics Drawer */}
           {workspaceMode === 'split' && (
             <div className="h-[42%] flex flex-col overflow-hidden bg-[#070709]">
-              <div className="h-9 shrink-0 px-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              <div className="h-9 shrink-0 px-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between gap-3 max-lg:overflow-x-auto max-lg:whitespace-nowrap max-lg:[&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+                <div className="flex items-center gap-2 shrink-0">
                   <FileCode className="w-3.5 h-3.5 text-sky-400" />
                   <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 text-[11px] font-mono">
                     <button
@@ -1857,7 +2070,7 @@ export default function LikharaEditor({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={handleDownloadCode}
@@ -1900,18 +2113,34 @@ export default function LikharaEditor({
         {/* ------------------------------------------------------------------
             RIGHT SIDEBAR: LIKHARA PROPERTY & SEMANTICS INSPECTOR
            ------------------------------------------------------------------ */}
-        <aside className="w-80 shrink-0 border-l border-zinc-800 bg-zinc-900/80 flex flex-col overflow-hidden">
+        <aside
+          className={`w-80 shrink-0 border-l border-zinc-800 bg-zinc-900/80 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
+            mobilePanel === 'inspector'
+              ? 'max-lg:translate-x-0'
+              : 'max-lg:translate-x-full'
+          }`}
+        >
           <div className="p-3 border-b border-zinc-800 bg-zinc-900 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <Sliders className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span className="text-xs font-bold text-white truncate">
                   {selectedNode.name}
                 </span>
               </div>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-sky-300 border border-zinc-700">
-                &lt;{selectedNode.tag}&gt;
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-zinc-800 text-sky-300 border border-zinc-700">
+                  &lt;{selectedNode.tag}&gt;
+                </span>
+                <button
+                  type="button"
+                  aria-label="Close panel"
+                  onClick={() => setMobilePanel('none')}
+                  className="hidden max-lg:flex p-1.5 -mr-1 rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-zinc-950 border border-zinc-800">
