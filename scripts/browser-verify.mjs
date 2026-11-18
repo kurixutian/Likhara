@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const URL_APP = process.argv[2] || 'http://localhost:5173/';
-const OUT = process.argv[3] || '/data/data/com.termux/files/usr/tmp/opencode/likhara-baseline';
+const OUT = process.argv[3] || new URL('../screenshots', import.meta.url).pathname;
 const CHROME = '/data/data/com.termux/files/usr/bin/chromium-browser';
 const PORT = 9777;
 
