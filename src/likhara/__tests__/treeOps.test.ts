@@ -6,6 +6,8 @@ import {
   removeNodeFromTree,
   duplicateNodeInTree,
   moveNodeInTree,
+  reparentNodeInTree,
+  collectContainerNodes,
   reorderSiblingInTree,
   resolveValidSelectedId,
   findNodeById,
@@ -151,5 +153,27 @@ describe('tree operations', () => {
     const tree = makeSampleTree();
     expect(resolveValidSelectedId(tree, 'btn')).toBe('btn');
     expect(resolveValidSelectedId(tree, 'missing-id')).toBe('root');
+  });
+
+  it('reparentNodeInTree and collectContainerNodes handle valid targets and locked/hidden rejections', () => {
+    const tree = makeSampleTree();
+    const containers = collectContainerNodes(tree, 'card');
+    expect(containers.map((c) => c.id)).toEqual(['root', 'header']);
+
+    const reparented = reparentNodeInTree(tree, 'btn', 'header');
+    expect(findNodeById(reparented, 'header')?.children.map((c) => c.id)).toEqual([
+      'title',
+      'btn',
+    ]);
+    expect(findNodeById(reparented, 'card')?.children).toHaveLength(0);
+
+    // Locked sibling cannot be reordered
+    const withLocked = {
+      ...tree,
+      children: tree.children.map((c) =>
+        c.id === 'header' ? { ...c, locked: true } : c
+      ),
+    };
+    expect(reorderSiblingInTree(withLocked, 'header', 'down')).toBe(withLocked);
   });
 });

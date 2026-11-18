@@ -160,10 +160,56 @@ export interface UINode {
   actionType?: ButtonActionType;
   /** Target URL or custom event name for button action */
   actionTarget?: string;
+  /** Default value for <input> and <textarea> */
+  defaultValue?: string;
+  /** Minimum character length for <input> and <textarea> */
+  minLength?: number;
+  /** Maximum character length for <input> and <textarea> */
+  maxLength?: number;
+  /** Disabled state for <button>, <input>, <textarea> */
+  disabled?: boolean;
+  /** Read-only state for <input>, <textarea> */
+  readOnly?: boolean;
+  /** Visible <label> text for <input> and <textarea> */
+  labelText?: string;
+  /** Object-fit behavior for <img> */
+  objectFit?: 'cover' | 'contain' | 'fill' | 'none';
+  /** Optional form action endpoint for <form> */
+  formAction?: string;
+  /** Form HTTP method for <form> */
+  formMethod?: 'GET' | 'POST';
+  /** Custom client-side validation success message for <form> */
+  submitMessage?: string;
   /** Visual style configuration */
   style: NodeStyleConfig;
   /** Recursive child nodes */
   children: UINode[];
+}
+
+export const MAX_IMAGE_DATA_URL_BYTES = 512 * 1024;
+
+/**
+ * Validates that a URL is safe for href, src, or form action attributes.
+ * Blocks javascript:, vbscript:, and non-image data: URIs.
+ */
+export function isSafeUrl(url: string, allowDataImage = false): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return true;
+  if (trimmed.startsWith('#') || trimmed.startsWith('/')) return true;
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('data:')) {
+    if (!allowDataImage) return false;
+    return /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(trimmed);
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return (
+      lower.startsWith('https://') ||
+      lower.startsWith('http://') ||
+      lower.startsWith('mailto:') ||
+      lower.startsWith('tel:')
+    );
+  }
+  return true;
 }
 
 export interface LikharaProject {
@@ -355,6 +401,10 @@ export function stylesToInlineCSS(node: UINode): CSSProperties {
   if (s.backdropBlur !== 'none') {
     style.backdropFilter = BLUR_CSS[s.backdropBlur];
     style.WebkitBackdropFilter = BLUR_CSS[s.backdropBlur];
+  }
+
+  if (node.tag === 'img' && node.objectFit) {
+    style.objectFit = node.objectFit;
   }
 
   if (node.isContainer) {
@@ -733,6 +783,10 @@ export function moveNodeInTree(
   const effectivePosition: DropPosition =
     position === 'inside' && !targetNode.isContainer ? 'after' : position;
 
+  if (targetNode.hidden && effectivePosition === 'inside') {
+    return root;
+  }
+
   // Cannot insert before/after the root node itself; would otherwise drop and lose sourceNode.
   if (targetNode.id === root.id && effectivePosition !== 'inside') {
     return root;
@@ -747,6 +801,34 @@ export function moveNodeInTree(
   );
 }
 
+export function reparentNodeInTree(
+  root: UINode,
+  sourceId: string,
+  newParentId: string
+): UINode {
+  const target = findNodeById(root, newParentId);
+  if (!target || !target.isContainer || target.hidden || target.locked) {
+    return root;
+  }
+  return moveNodeInTree(root, sourceId, newParentId, 'inside');
+}
+
+export function collectContainerNodes(
+  root: UINode,
+  excludeSubtreeId?: string
+): { id: string; name: string; tag: UITag }[] {
+  const result: { id: string; name: string; tag: UITag }[] = [];
+  function walk(node: UINode): void {
+    if (excludeSubtreeId && node.id === excludeSubtreeId) return;
+    if (node.isContainer && !node.hidden && !node.locked) {
+      result.push({ id: node.id, name: node.name, tag: node.tag });
+    }
+    node.children.forEach(walk);
+  }
+  walk(root);
+  return result;
+}
+
 export function reorderSiblingInTree(
   root: UINode,
   targetId: string,
@@ -754,6 +836,7 @@ export function reorderSiblingInTree(
 ): UINode {
   const idx = root.children.findIndex((c) => c.id === targetId);
   if (idx !== -1) {
+    if (root.children[idx].locked) return root;
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (swapIdx < 0 || swapIdx >= root.children.length) return root;
     const next = [...root.children];
@@ -965,6 +1048,34 @@ export function normalizeNodeSchema(raw: unknown): UINode | null {
         : undefined,
     actionTarget:
       typeof obj.actionTarget === 'string' ? obj.actionTarget : undefined,
+    defaultValue:
+      typeof obj.defaultValue === 'string' ? obj.defaultValue : undefined,
+    minLength:
+      typeof obj.minLength === 'number' && Number.isFinite(obj.minLength)
+        ? Math.max(0, Math.floor(obj.minLength))
+        : undefined,
+    maxLength:
+      typeof obj.maxLength === 'number' && Number.isFinite(obj.maxLength)
+        ? Math.max(0, Math.floor(obj.maxLength))
+        : undefined,
+    disabled: Boolean(obj.disabled),
+    readOnly: Boolean(obj.readOnly),
+    labelText: typeof obj.labelText === 'string' ? obj.labelText : undefined,
+    objectFit:
+      obj.objectFit === 'cover' ||
+      obj.objectFit === 'contain' ||
+      obj.objectFit === 'fill' ||
+      obj.objectFit === 'none'
+        ? obj.objectFit
+        : undefined,
+    formAction:
+      typeof obj.formAction === 'string' ? obj.formAction : undefined,
+    formMethod:
+      obj.formMethod === 'GET' || obj.formMethod === 'POST'
+        ? obj.formMethod
+        : undefined,
+    submitMessage:
+      typeof obj.submitMessage === 'string' ? obj.submitMessage : undefined,
     style,
     children,
   };
@@ -1013,6 +1124,39 @@ export function validateUINodeTree(
       errors.push(
         `${path}: Unsupported HTML tag '${String(n.tag)}'. Allowed: ${ALLOWED_UI_TAGS.join(', ')}.`
       );
+    }
+
+    if (typeof n.href === 'string' && !isSafeUrl(n.href)) {
+      errors.push(`${path}: Unsafe href URL protocol rejected.`);
+    }
+    if (typeof n.src === 'string' && !isSafeUrl(n.src, true)) {
+      errors.push(`${path}: Unsafe image src URL protocol rejected.`);
+    }
+    if (typeof n.actionTarget === 'string' && n.actionType === 'navigate' && !isSafeUrl(n.actionTarget)) {
+      errors.push(`${path}: Unsafe button navigate URL protocol rejected.`);
+    }
+    if (typeof n.formAction === 'string' && !isSafeUrl(n.formAction)) {
+      errors.push(`${path}: Unsafe form action URL protocol rejected.`);
+    }
+
+    if (n.style && typeof n.style === 'object') {
+      const st = n.style as Record<string, unknown>;
+      const checkRange = (key: string, min: number, max: number) => {
+        if (key in st && st[key] !== undefined) {
+          if (typeof st[key] !== 'number' || !Number.isFinite(st[key]) || st[key] < min || st[key] > max) {
+            errors.push(`${path}.style.${key}: Value must be between ${min} and ${max}.`);
+          }
+        }
+      };
+      checkRange('opacity', 0, 100);
+      checkRange('bgAlpha', 0, 100);
+      checkRange('textAlpha', 0, 100);
+      checkRange('borderAlpha', 0, 100);
+      checkRange('borderWidth', 0, 100);
+      checkRange('paddingX', 0, 1000);
+      checkRange('paddingY', 0, 1000);
+      checkRange('gap', 0, 1000);
+      checkRange('borderRadius', 0, 9999);
     }
 
     if (!Array.isArray(n.children)) {
@@ -1075,6 +1219,14 @@ export function parseAndValidateImport(rawJson: string): ValidationResult {
   const obj = parsed as Record<string, unknown>;
   // Check if it is a LikharaProject envelope
   if (obj.root && typeof obj.root === 'object') {
+    if ('schemaVersion' in obj && obj.schemaVersion !== 1) {
+      return {
+        valid: false,
+        errors: [
+          `Unsupported schemaVersion '${String(obj.schemaVersion)}'. Expected 1.`,
+        ],
+      };
+    }
     const treeCheck = validateUINodeTree(obj.root);
     return {
       ...treeCheck,
@@ -1206,7 +1358,8 @@ function buildSemanticAttributesJSX(node: UINode): string {
   }
 
   if (node.tag === 'a') {
-    const href = node.href?.trim() || '#';
+    const rawHref = node.href?.trim() || '#';
+    const href = isSafeUrl(rawHref) ? rawHref : '#';
     attrs.push(`href="${escapeHTMLAttr(href)}"`);
     if (node.targetBlank) {
       attrs.push('target="_blank"', 'rel="noopener noreferrer"');
@@ -1216,13 +1369,15 @@ function buildSemanticAttributesJSX(node: UINode): string {
   if (node.tag === 'button') {
     const btnType = node.actionType === 'submit' ? 'submit' : 'button';
     attrs.push(`type="${btnType}"`);
+    if (node.disabled) attrs.push('disabled');
     if (node.actionType === 'navigate' && node.actionTarget?.trim()) {
-      const targetUrl = node.actionTarget.trim().replace(/'/g, "\\'");
-      attrs.push(`onClick={() => { window.location.href = '${targetUrl}'; }}`);
+      const rawUrl = node.actionTarget.trim();
+      const targetUrl = isSafeUrl(rawUrl) ? rawUrl : '#';
+      attrs.push(`onClick={() => { window.location.href = ${JSON.stringify(targetUrl)}; }}`);
     } else if (node.actionType === 'custom-event' && node.actionTarget?.trim()) {
-      const evtName = node.actionTarget.trim().replace(/'/g, "\\'");
+      const evtName = node.actionTarget.trim();
       attrs.push(
-        `onClick={() => { window.dispatchEvent(new CustomEvent('${evtName}')); }}`
+        `onClick={() => { window.dispatchEvent(new CustomEvent(${JSON.stringify(evtName)})); }}`
       );
     }
   }
@@ -1235,9 +1390,18 @@ function buildSemanticAttributesJSX(node: UINode): string {
     if (node.placeholder?.trim()) {
       attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
     }
-    if (node.required) {
-      attrs.push('required');
+    if (node.defaultValue !== undefined && node.defaultValue !== '') {
+      attrs.push(`defaultValue="${escapeHTMLAttr(node.defaultValue)}"`);
     }
+    if (typeof node.minLength === 'number') {
+      attrs.push(`minLength={${node.minLength}}`);
+    }
+    if (typeof node.maxLength === 'number') {
+      attrs.push(`maxLength={${node.maxLength}}`);
+    }
+    if (node.required) attrs.push('required');
+    if (node.disabled) attrs.push('disabled');
+    if (node.readOnly) attrs.push('readOnly');
   }
 
   if (node.tag === 'textarea') {
@@ -1247,22 +1411,35 @@ function buildSemanticAttributesJSX(node: UINode): string {
     if (node.placeholder?.trim()) {
       attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
     }
-    if (node.required) {
-      attrs.push('required');
+    if (node.defaultValue !== undefined && node.defaultValue !== '') {
+      attrs.push(`defaultValue="${escapeHTMLAttr(node.defaultValue)}"`);
     }
+    if (typeof node.minLength === 'number') {
+      attrs.push(`minLength={${node.minLength}}`);
+    }
+    if (typeof node.maxLength === 'number') {
+      attrs.push(`maxLength={${node.maxLength}}`);
+    }
+    if (node.required) attrs.push('required');
+    if (node.disabled) attrs.push('disabled');
+    if (node.readOnly) attrs.push('readOnly');
   }
 
   if (node.tag === 'img') {
-    attrs.push(
-      `src="${escapeHTMLAttr(
-        node.src?.trim() ||
-          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
-      )}"`
-    );
+    const rawSrc = node.src?.trim() || '';
+    const safeSrc =
+      rawSrc && isSafeUrl(rawSrc, true)
+        ? rawSrc
+        : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
+    attrs.push(`src="${escapeHTMLAttr(safeSrc)}"`);
     attrs.push(`alt="${escapeHTMLAttr(node.alt?.trim() || node.name)}"`);
   }
 
   if (node.tag === 'form') {
+    if (node.formAction?.trim() && isSafeUrl(node.formAction)) {
+      attrs.push(`action="${escapeHTMLAttr(node.formAction.trim())}"`);
+      attrs.push(`method="${node.formMethod || 'POST'}"`);
+    }
     attrs.push('onSubmit={(e) => { e.preventDefault(); }}');
   }
 
@@ -1277,7 +1454,8 @@ function buildSemanticAttributesHTML(node: UINode): string {
   }
 
   if (node.tag === 'a') {
-    const href = node.href?.trim() || '#';
+    const rawHref = node.href?.trim() || '#';
+    const href = isSafeUrl(rawHref) ? rawHref : '#';
     attrs.push(`href="${escapeHTMLAttr(href)}"`);
     if (node.targetBlank) {
       attrs.push('target="_blank"', 'rel="noopener noreferrer"');
@@ -1287,11 +1465,11 @@ function buildSemanticAttributesHTML(node: UINode): string {
   if (node.tag === 'button') {
     const btnType = node.actionType === 'submit' ? 'submit' : 'button';
     attrs.push(`type="${btnType}"`);
+    if (node.disabled) attrs.push('disabled');
     if (node.actionType === 'navigate' && node.actionTarget?.trim()) {
+      const targetUrl = isSafeUrl(node.actionTarget.trim()) ? node.actionTarget.trim() : '#';
       attrs.push(
-        `data-action="navigate" data-target="${escapeHTMLAttr(
-          node.actionTarget.trim()
-        )}"`
+        `data-action="navigate" data-target="${escapeHTMLAttr(targetUrl)}"`
       );
     } else if (node.actionType === 'custom-event' && node.actionTarget?.trim()) {
       attrs.push(
@@ -1310,9 +1488,18 @@ function buildSemanticAttributesHTML(node: UINode): string {
     if (node.placeholder?.trim()) {
       attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
     }
-    if (node.required) {
-      attrs.push('required');
+    if (node.defaultValue !== undefined && node.defaultValue !== '') {
+      attrs.push(`value="${escapeHTMLAttr(node.defaultValue)}"`);
     }
+    if (typeof node.minLength === 'number') {
+      attrs.push(`minlength="${node.minLength}"`);
+    }
+    if (typeof node.maxLength === 'number') {
+      attrs.push(`maxlength="${node.maxLength}"`);
+    }
+    if (node.required) attrs.push('required');
+    if (node.disabled) attrs.push('disabled');
+    if (node.readOnly) attrs.push('readonly');
   }
 
   if (node.tag === 'textarea') {
@@ -1322,19 +1509,35 @@ function buildSemanticAttributesHTML(node: UINode): string {
     if (node.placeholder?.trim()) {
       attrs.push(`placeholder="${escapeHTMLAttr(node.placeholder.trim())}"`);
     }
-    if (node.required) {
-      attrs.push('required');
+    if (typeof node.minLength === 'number') {
+      attrs.push(`minlength="${node.minLength}"`);
     }
+    if (typeof node.maxLength === 'number') {
+      attrs.push(`maxlength="${node.maxLength}"`);
+    }
+    if (node.required) attrs.push('required');
+    if (node.disabled) attrs.push('disabled');
+    if (node.readOnly) attrs.push('readonly');
   }
 
   if (node.tag === 'img') {
-    attrs.push(
-      `src="${escapeHTMLAttr(
-        node.src?.trim() ||
-          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
-      )}"`
-    );
+    const rawSrc = node.src?.trim() || '';
+    const safeSrc =
+      rawSrc && isSafeUrl(rawSrc, true)
+        ? rawSrc
+        : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
+    attrs.push(`src="${escapeHTMLAttr(safeSrc)}"`);
     attrs.push(`alt="${escapeHTMLAttr(node.alt?.trim() || node.name)}"`);
+  }
+
+  if (node.tag === 'form') {
+    if (node.formAction?.trim() && isSafeUrl(node.formAction)) {
+      attrs.push(`action="${escapeHTMLAttr(node.formAction.trim())}"`);
+      attrs.push(`method="${node.formMethod || 'POST'}"`);
+    }
+    if (node.submitMessage?.trim()) {
+      attrs.push(`data-submit-message="${escapeHTMLAttr(node.submitMessage.trim())}"`);
+    }
   }
 
   return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
@@ -1444,7 +1647,8 @@ export function compileNodeToHTML(node: UINode, depth = 2): string {
   }
 
   if (node.tag === 'textarea') {
-    return `${indent}<textarea${classAttr}${styleAttr}${semAttrs}></textarea>`;
+    const val = escapeJSXText(node.defaultValue || '');
+    return `${indent}<textarea${classAttr}${styleAttr}${semAttrs}>${val}</textarea>`;
   }
 
   const visibleChildren = node.children.filter((c) => !c.hidden);
@@ -1475,8 +1679,79 @@ export function compileToStandaloneHTML(
 </head>
 <body class="bg-zinc-950 text-zinc-100 p-6 min-h-screen">
 ${body}
+  <script>
+    (function () {
+      document.addEventListener('click', function (e) {
+        var btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
+        if (!btn) return;
+        var action = btn.getAttribute('data-action');
+        if (action === 'navigate') {
+          var target = btn.getAttribute('data-target');
+          if (target && target !== '#') window.location.href = target;
+        } else if (action === 'custom-event') {
+          var evtName = btn.getAttribute('data-event');
+          if (evtName) window.dispatchEvent(new CustomEvent(evtName));
+        }
+      });
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || form.tagName !== 'FORM') return;
+        if (!form.getAttribute('action')) {
+          e.preventDefault();
+          var msg = form.getAttribute('data-submit-message') || 'Form validated and submitted.';
+          var banner = form.querySelector('[data-likhara-form-status]');
+          if (!banner) {
+            banner = document.createElement('p');
+            banner.setAttribute('data-likhara-form-status', 'true');
+            banner.setAttribute('role', 'status');
+            banner.style.cssText = 'margin-top:8px;font-size:12px;color:#34d399;';
+            form.appendChild(banner);
+          }
+          banner.textContent = msg;
+        }
+      });
+    })();
+  </script>
 </body>
 </html>`;
+}
+
+export interface ExportValidationReport {
+  valid: boolean;
+  errors: string[];
+  warnings: ExportDiagnostic[];
+}
+
+/**
+ * Validates generated export code for non-empty structure, unsafe URLs, and semantic diagnostics.
+ */
+export function validateExportedCode(
+  root: UINode,
+  format: 'react-tw' | 'react-inline' | 'html',
+  compiledCode: string
+): ExportValidationReport {
+  const errors: string[] = [];
+  if (!compiledCode || !compiledCode.trim()) {
+    errors.push('Generated output is empty.');
+  }
+  if (/href=["']\s*javascript:/i.test(compiledCode)) {
+    errors.push('Unsafe javascript: href detected in compiled output.');
+  }
+  if (format === 'html') {
+    if (!compiledCode.includes('<!DOCTYPE html>') || !compiledCode.includes('</html>')) {
+      errors.push('Standalone HTML document is missing DOCTYPE or closing </html>.');
+    }
+  } else {
+    if (!compiledCode.includes('export default function')) {
+      errors.push('React export is missing default component export.');
+    }
+  }
+  const warnings = collectExportDiagnostics(root);
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
 }
 
 // ============================================================================

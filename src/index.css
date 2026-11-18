@@ -71,14 +71,14 @@
   }
 }
 
-/* Respect reduced-motion preferences everywhere. */
+/* Respect reduced-motion preferences without stripping color/opacity state feedback. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition-property: color, background-color, border-color, opacity, box-shadow !important;
+    transition-duration: 120ms !important;
     scroll-behavior: auto !important;
   }
 }

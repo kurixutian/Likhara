@@ -60,11 +60,16 @@ import {
   insertNodeInTree,
   duplicateNodeInTree,
   moveNodeInTree,
+  reparentNodeInTree,
+  collectContainerNodes,
   reorderSiblingInTree,
   countNodesInTree,
   parseAndValidateImport,
   resolveValidSelectedId,
   collectExportDiagnostics,
+  validateExportedCode,
+  isSafeUrl,
+  MAX_IMAGE_DATA_URL_BYTES,
   compileToReactTailwind,
   compileToReactInlineStyle,
   compileToStandaloneHTML,
@@ -360,6 +365,26 @@ export default function LikharaEditor({
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageUploadRef = useRef<HTMLInputElement | null>(null);
+  const activeResizeCleanupRef = useRef<(() => void) | null>(null);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeResizeCleanupRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showImportModal) setShowImportModal(false);
+      else if (mobileMenuOpen) setMobileMenuOpen(false);
+      else if (mobilePanel !== 'none') setMobilePanel('none');
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [showImportModal, mobileMenuOpen, mobilePanel]);
 
   const isPreviewMode = workspaceMode === 'preview';
 
@@ -648,6 +673,10 @@ export default function LikharaEditor({
     const scale = canvasZoom / 100;
     const startWidth = Math.round(rect.width / scale);
     const startHeight = Math.round(rect.height / scale);
+    const parentRect = targetEl.parentElement?.getBoundingClientRect();
+    const maxAllowedWidth = parentRect
+      ? Math.max(64, Math.min(1200, Math.round(parentRect.width / scale)))
+      : 1200;
     const startX = e.clientX;
     const startY = e.clientY;
 
@@ -656,11 +685,14 @@ export default function LikharaEditor({
     const onPointerMove = (moveEvt: PointerEvent) => {
       const deltaX = (moveEvt.clientX - startX) / scale;
       const deltaY = (moveEvt.clientY - startY) / scale;
-      const nextW = Math.max(64, Math.min(1200, Math.round(startWidth + deltaX)));
+      const nextW = Math.max(
+        64,
+        Math.min(maxAllowedWidth, Math.round(startWidth + deltaX))
+      );
       const nextH = Math.max(32, Math.min(900, Math.round(startHeight + deltaY)));
 
       replaceCurrentTreeFrame(
-        updateNodeInTree(liveRoot, node.id, (n) => ({
+        updateNodeInTree(liveRootRef.current, node.id, (n) => ({
           ...n,
           style: {
             ...n.style,
@@ -671,16 +703,30 @@ export default function LikharaEditor({
       );
     };
 
-    const onPointerUp = () => {
+    const cleanup = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      activeResizeCleanupRef.current = null;
+    };
+
+    const onPointerUp = () => {
+      cleanup();
       endGestureTransaction(`Resize ${node.name}`);
     };
 
+    const onPointerCancel = () => {
+      cleanup();
+      if (gestureStartSnapshotRef.current) {
+        replaceCurrentTreeFrame(gestureStartSnapshotRef.current);
+        gestureStartSnapshotRef.current = null;
+      }
+    };
+
+    activeResizeCleanupRef.current = cleanup;
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
   };
 
   // --------------------------------------------------------------------------
@@ -713,7 +759,7 @@ export default function LikharaEditor({
     e: React.DragEvent<HTMLElement>,
     targetNode: UINode
   ) => {
-    if (isPreviewMode) return;
+    if (isPreviewMode || targetNode.locked || targetNode.hidden) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -745,12 +791,13 @@ export default function LikharaEditor({
     e: React.DragEvent<HTMLElement>,
     targetNode: UINode
   ) => {
-    if (isPreviewMode) return;
+    if (isPreviewMode || targetNode.locked) return;
     e.preventDefault();
     e.stopPropagation();
 
     const dropPos: DropPosition = dragState?.position || 'inside';
     setDragState(null);
+    if (targetNode.hidden && dropPos === 'inside') return;
 
     const source = e.dataTransfer.getData('application/likhara-source');
     if (source === 'palette') {
@@ -803,6 +850,11 @@ export default function LikharaEditor({
       return compileToReactInlineStyle(liveRoot);
     return compileToStandaloneHTML(liveRoot, projectMeta.name);
   }, [liveRoot, codeFormat, projectMeta.name]);
+
+  const exportValidation = useMemo(
+    () => validateExportedCode(liveRoot, codeFormat, compiledCode),
+    [liveRoot, codeFormat, compiledCode]
+  );
 
   const handleCopyCode = async () => {
     try {
@@ -1020,8 +1072,10 @@ export default function LikharaEditor({
       onDragOver: (e: React.DragEvent<HTMLElement>) =>
         handleNodeDragOver(e, node),
       onDrop: (e: React.DragEvent<HTMLElement>) => handleNodeDrop(e, node),
+      onDragEnd: () => setDragState(null),
       onClick: (e: React.MouseEvent<HTMLElement>) => {
         if (!isPreviewMode) {
+          if (node.tag === 'a') e.preventDefault();
           e.stopPropagation();
           setSelectedId(node.id);
           return;
@@ -1081,6 +1135,7 @@ export default function LikharaEditor({
     }
 
     if (node.tag === 'input' || node.tag === 'textarea') {
+      const controlId = `preview-ctrl-${node.id}`;
       return (
         <div
           key={node.id}
@@ -1090,14 +1145,28 @@ export default function LikharaEditor({
         >
           {floatingBar}
           {resizeHandle}
+          {node.labelText && (
+            <label
+              htmlFor={controlId}
+              className="block text-xs font-medium text-zinc-300 mb-1"
+            >
+              {node.labelText}
+              {node.required ? <span className="text-rose-400 ml-0.5">*</span> : null}
+            </label>
+          )}
           {node.tag === 'input' ? (
             <input
+              id={controlId}
               type={node.inputType || 'text'}
               name={node.nameAttr}
               placeholder={node.placeholder || ''}
+              defaultValue={node.defaultValue}
+              minLength={node.minLength}
+              maxLength={node.maxLength}
               required={node.required}
-              aria-label={node.ariaLabel || node.placeholder || node.name}
-              readOnly={!isPreviewMode}
+              disabled={isPreviewMode && Boolean(node.disabled)}
+              aria-label={node.ariaLabel || node.labelText || node.placeholder || node.name}
+              readOnly={!isPreviewMode || Boolean(node.readOnly)}
               style={{ ...inlineStyle, width: '100%' }}
               className={`${node.style.customClass} focus:outline-none ${
                 !isPreviewMode ? 'pointer-events-none' : ''
@@ -1105,11 +1174,16 @@ export default function LikharaEditor({
             />
           ) : (
             <textarea
+              id={controlId}
               name={node.nameAttr}
               placeholder={node.placeholder || ''}
+              defaultValue={node.defaultValue}
+              minLength={node.minLength}
+              maxLength={node.maxLength}
               required={node.required}
-              aria-label={node.ariaLabel || node.placeholder || node.name}
-              readOnly={!isPreviewMode}
+              disabled={isPreviewMode && Boolean(node.disabled)}
+              aria-label={node.ariaLabel || node.labelText || node.placeholder || node.name}
+              readOnly={!isPreviewMode || Boolean(node.readOnly)}
               style={{ ...inlineStyle, width: '100%' }}
               className={`${node.style.customClass} focus:outline-none ${
                 !isPreviewMode ? 'pointer-events-none' : ''
@@ -1124,20 +1198,64 @@ export default function LikharaEditor({
     // union of all allowed element types (e.g. onSubmit typed per element).
     const TagComponent: React.ElementType = node.tag;
 
+    const tagSpecificProps: Record<string, unknown> = {};
+    if (node.tag === 'a') {
+      const safeHref = node.href?.trim() && isSafeUrl(node.href) ? node.href.trim() : '#';
+      tagSpecificProps.href = safeHref;
+      if (node.targetBlank) {
+        tagSpecificProps.target = '_blank';
+        tagSpecificProps.rel = 'noopener noreferrer';
+      }
+    } else if (node.tag === 'button') {
+      tagSpecificProps.type = node.actionType === 'submit' ? 'submit' : 'button';
+      if (isPreviewMode && node.disabled) {
+        tagSpecificProps.disabled = true;
+      }
+    } else if (node.tag === 'form') {
+      if (node.formAction?.trim() && isSafeUrl(node.formAction)) {
+        tagSpecificProps.action = node.formAction.trim();
+        tagSpecificProps.method = node.formMethod || 'POST';
+      }
+    }
+
     return (
       <TagComponent
         key={node.id}
         {...commonInteractionProps}
+        {...tagSpecificProps}
         aria-label={node.ariaLabel}
         onSubmit={
           node.tag === 'form'
             ? (e: React.FormEvent<HTMLElement>) => {
                 e.preventDefault();
-                if (isPreviewMode) {
-                  setPreviewFeedback(
-                    `Form "${node.name}" validated and submitted in Preview.`
-                  );
+                if (!isPreviewMode) return;
+                const controls = Array.from(
+                  e.currentTarget.querySelectorAll('input, textarea')
+                ) as (HTMLInputElement | HTMLTextAreaElement)[];
+                for (const ctrl of controls) {
+                  const val = ctrl.value;
+                  const label = ctrl.getAttribute('aria-label') || ctrl.name || 'Field';
+                  if (ctrl.required && !val.trim()) {
+                    setPreviewFeedback(`Validation error: "${label}" is required.`);
+                    return;
+                  }
+                  if (ctrl.minLength > 0 && val.length > 0 && val.length < ctrl.minLength) {
+                    setPreviewFeedback(`Validation error: "${label}" must be at least ${ctrl.minLength} characters.`);
+                    return;
+                  }
+                  if (ctrl instanceof HTMLInputElement && ctrl.type === 'email' && val.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim())) {
+                    setPreviewFeedback(`Validation error: "${label}" must be a valid email address.`);
+                    return;
+                  }
+                  if (ctrl instanceof HTMLInputElement && ctrl.type === 'url' && val.trim() && !isSafeUrl(val.trim())) {
+                    setPreviewFeedback(`Validation error: "${label}" must be a valid URL.`);
+                    return;
+                  }
                 }
+                setPreviewFeedback(
+                  node.submitMessage?.trim() ||
+                    `Form "${node.name}" validated and submitted in Preview.`
+                );
               }
             : undefined
         }
@@ -1225,8 +1343,9 @@ export default function LikharaEditor({
                 type="button"
                 aria-label="Move layer up"
                 title="Move Up"
+                disabled={Boolean(node.locked)}
                 onClick={() => handleReorderSibling(node.id, 'up')}
-                className="p-1 hover:text-white cursor-pointer"
+                className="p-1 hover:text-white disabled:opacity-30 cursor-pointer"
               >
                 <ArrowUp className="w-3 h-3" />
               </button>
@@ -1234,8 +1353,9 @@ export default function LikharaEditor({
                 type="button"
                 aria-label="Move layer down"
                 title="Move Down"
+                disabled={Boolean(node.locked)}
                 onClick={() => handleReorderSibling(node.id, 'down')}
-                className="p-1 hover:text-white cursor-pointer"
+                className="p-1 hover:text-white disabled:opacity-30 cursor-pointer"
               >
                 <ArrowDown className="w-3 h-3" />
               </button>
@@ -1295,14 +1415,14 @@ export default function LikharaEditor({
           >
             <Home className="w-4 h-4" />
           </button>
-          <div className="w-7 h-7 rounded-md bg-sky-600 flex items-center justify-center text-white font-bold text-[10px] tracking-wider shrink-0">
+          <div className="hidden sm:flex w-7 h-7 rounded-md bg-sky-600 items-center justify-center text-white font-bold text-[10px] tracking-wider shrink-0">
             LK
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="hidden lg:inline text-xs font-semibold tracking-tight text-zinc-100">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="sr-only lg:not-sr-only lg:inline text-xs font-semibold tracking-tight text-zinc-100">
                 Likhara Studio
-              </span>
+              </h1>
               <input
                 type="text"
                 aria-label="Project Name"
@@ -1313,9 +1433,11 @@ export default function LikharaEditor({
                     name: e.target.value,
                   }))
                 }
-                className="px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-medium focus:outline-none focus:border-sky-500 w-24 shrink-0 sm:w-44"
+                className="px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-medium focus:outline-none focus:border-sky-500 w-20 shrink-0 sm:w-44"
               />
               <span
+                role="status"
+                aria-live="polite"
                 title={saveErrorMsg || 'Local persistence status'}
                 className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono border shrink-0 ${
                   saveStatus === 'saved'
@@ -1350,7 +1472,7 @@ export default function LikharaEditor({
             >
               <Undo2 className="w-3.5 h-3.5" />
             </button>
-            <span className="px-1.5 font-mono text-[10px] text-zinc-500">
+            <span className="hidden sm:inline px-1.5 font-mono text-[10px] text-zinc-500">
               {historyIndex + 1}/{history.length}
             </span>
             <button
@@ -1439,6 +1561,7 @@ export default function LikharaEditor({
             </button>
             <button
               type="button"
+              aria-label="Reset to Starter Template"
               onClick={() =>
                 commitTree(
                   DEFAULT_LIKHARA_STARTER_TREE,
@@ -1637,12 +1760,17 @@ export default function LikharaEditor({
           IMPORT VALIDATION MODAL (SAFE SCHEMA VALIDATION)
          ==================================================================== */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-modal-title"
+          className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+        >
           <div className="w-full max-w-lg rounded-xl bg-zinc-900 border border-zinc-800 shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-sky-400" />
-                <h2 className="text-sm font-bold text-white">
+                <h2 id="import-modal-title" className="text-sm font-bold text-white">
                   Import &amp; Validate Likhara Project JSON
                 </h2>
               </div>
@@ -1729,6 +1857,7 @@ export default function LikharaEditor({
             LEFT SIDEBAR: COMPONENT PALETTE & DOM LAYER TREE
            ------------------------------------------------------------------ */}
         <aside
+          aria-label="Components and Layers"
           className={`w-64 shrink-0 border-r border-zinc-800 bg-zinc-900/70 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
             mobilePanel === 'left'
               ? 'max-lg:translate-x-0'
@@ -1815,6 +1944,7 @@ export default function LikharaEditor({
                       key={item.type}
                       draggable
                       onDragStart={(e) => handlePaletteDragStart(e, item.type)}
+                      onDragEnd={() => setDragState(null)}
                       className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
                     >
                       <div className="min-w-0">
@@ -1854,6 +1984,7 @@ export default function LikharaEditor({
                       key={item.type}
                       draggable
                       onDragStart={(e) => handlePaletteDragStart(e, item.type)}
+                      onDragEnd={() => setDragState(null)}
                       className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
                     >
                       <div className="min-w-0">
@@ -1984,7 +2115,15 @@ export default function LikharaEditor({
 
           {/* Preview Interaction Banner */}
           {isPreviewMode && previewFeedback && (
-            <div className="px-4 py-1.5 bg-emerald-950/80 border-b border-emerald-500/40 text-xs text-emerald-200 flex items-center justify-between">
+            <div
+              role="status"
+              aria-live="polite"
+              className={`px-4 py-1.5 border-b text-xs flex items-center justify-between ${
+                previewFeedback.startsWith('Validation error:')
+                  ? 'bg-rose-950/80 border-rose-500/40 text-rose-200'
+                  : 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200'
+              }`}
+            >
               <span>{previewFeedback}</span>
               <button
                 type="button"
@@ -2066,14 +2205,19 @@ export default function LikharaEditor({
                     </button>
                   </div>
 
-                  {exportDiagnostics.length === 0 ? (
+                  {!exportValidation.valid ? (
+                    <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded">
+                      <AlertTriangle className="w-3 h-3" />
+                      {exportValidation.errors[0]}
+                    </span>
+                  ) : exportDiagnostics.length === 0 ? (
                     <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                      <CheckCircle2 className="w-3 h-3" />0 Semantic Warnings
+                      <CheckCircle2 className="w-3 h-3" />Validated • 0 Warnings
                     </span>
                   ) : (
                     <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
                       <AlertTriangle className="w-3 h-3" />
-                      {exportDiagnostics.length} Diagnostic(s)
+                      Validated • {exportDiagnostics.length} Diagnostic(s)
                     </span>
                   )}
                 </div>
@@ -2122,6 +2266,7 @@ export default function LikharaEditor({
             RIGHT SIDEBAR: LIKHARA PROPERTY & SEMANTICS INSPECTOR
            ------------------------------------------------------------------ */}
         <aside
+          aria-label="Properties Inspector"
           className={`w-80 shrink-0 border-l border-zinc-800 bg-zinc-900/80 flex flex-col overflow-hidden max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-[85vw] max-lg:max-w-[380px] max-lg:bg-zinc-900 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 ${
             mobilePanel === 'inspector'
               ? 'max-lg:translate-x-0'
@@ -2694,6 +2839,39 @@ export default function LikharaEditor({
                         ))}
                       </select>
                     </div>
+
+                    {selectedNode.id !== 'root' && parentIdOfSelected && (
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
+                          Parent Container (Move / Reparent)
+                        </label>
+                        <select
+                          aria-label="Move to parent container"
+                          value={parentIdOfSelected}
+                          onChange={(e) => {
+                            const targetParentId = e.target.value;
+                            if (targetParentId === parentIdOfSelected) return;
+                            const next = reparentNodeInTree(
+                              liveRoot,
+                              selectedNode.id,
+                              targetParentId
+                            );
+                            if (next !== liveRoot) {
+                              commitTree(next, selectedNode.id, 'Reparent Element');
+                            }
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        >
+                          {collectContainerNodes(liveRoot, selectedNode.id).map(
+                            (c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name} (&lt;{c.tag}&gt;)
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {/* Text Content */}
@@ -2748,6 +2926,11 @@ export default function LikharaEditor({
                           placeholder="https://..."
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                         />
+                        {selectedNode.href && !isSafeUrl(selectedNode.href) && (
+                          <p className="mt-1 text-[10px] text-rose-400">
+                            Unsafe URL scheme blocked (use https://, http://, /, #, mailto:, or tel:).
+                          </p>
+                        )}
                       </div>
                       <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                         <input
@@ -2829,8 +3012,106 @@ export default function LikharaEditor({
                             }
                             className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                           />
+                          {selectedNode.actionType === 'navigate' &&
+                            selectedNode.actionTarget &&
+                            !isSafeUrl(selectedNode.actionTarget) && (
+                              <p className="mt-1 text-[10px] text-rose-400">
+                                Unsafe navigation URL scheme blocked.
+                              </p>
+                            )}
                         </div>
                       )}
+                      <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedNode.disabled)}
+                          onChange={(e) =>
+                            updateSelectedDiscrete(
+                              (n) => ({ ...n, disabled: e.target.checked }),
+                              'Toggle Button Disabled'
+                            )
+                          }
+                        />
+                        Disabled (`disabled`)
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Form Container Semantics */}
+                  {selectedNode.tag === 'form' && (
+                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2.5">
+                      <span className="block text-[10px] font-mono uppercase text-sky-400">
+                        Form Submission &amp; Validation (&lt;form&gt;)
+                      </span>
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          Endpoint Action URL (optional)
+                        </label>
+                        <input
+                          type="url"
+                          aria-label="Form action URL"
+                          value={selectedNode.formAction || ''}
+                          onFocus={beginGestureTransaction}
+                          onChange={(e) =>
+                            updateSelectedLive((n) => ({
+                              ...n,
+                              formAction: e.target.value,
+                            }))
+                          }
+                          onBlur={() => endGestureTransaction('Set Form Action')}
+                          placeholder="Leave empty for client-side preview"
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
+                        />
+                        {selectedNode.formAction && !isSafeUrl(selectedNode.formAction) && (
+                          <p className="mt-1 text-[10px] text-rose-400">
+                            Unsafe form action URL blocked.
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          HTTP Method
+                        </label>
+                        <select
+                          aria-label="Form HTTP method"
+                          value={selectedNode.formMethod || 'POST'}
+                          onChange={(e) =>
+                            updateSelectedDiscrete(
+                              (n) => ({
+                                ...n,
+                                formMethod: e.target.value as 'GET' | 'POST',
+                              }),
+                              'Set Form Method'
+                            )
+                          }
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        >
+                          <option value="POST">POST</option>
+                          <option value="GET">GET</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          Validation Success Feedback
+                        </label>
+                        <input
+                          type="text"
+                          aria-label="Form success message"
+                          value={selectedNode.submitMessage || ''}
+                          onFocus={beginGestureTransaction}
+                          onChange={(e) =>
+                            updateSelectedLive((n) => ({
+                              ...n,
+                              submitMessage: e.target.value,
+                            }))
+                          }
+                          onBlur={() =>
+                            endGestureTransaction('Set Form Success Message')
+                          }
+                          placeholder="Form validated and submitted."
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        />
+                      </div>
                     </div>
                   )}
 
@@ -2870,6 +3151,26 @@ export default function LikharaEditor({
                           </select>
                         </div>
                       )}
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          Visible Field Label
+                        </label>
+                        <input
+                          type="text"
+                          aria-label="Visible field label"
+                          value={selectedNode.labelText || ''}
+                          onFocus={beginGestureTransaction}
+                          onChange={(e) =>
+                            updateSelectedLive((n) => ({
+                              ...n,
+                              labelText: e.target.value,
+                            }))
+                          }
+                          onBlur={() => endGestureTransaction('Set Field Label')}
+                          placeholder="e.g. Email Address"
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        />
+                      </div>
                       <div>
                         <label className="block text-[10px] text-zinc-400 mb-1">
                           Field Name (`name`)
@@ -2913,6 +3214,79 @@ export default function LikharaEditor({
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
                         />
                       </div>
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          Default Value
+                        </label>
+                        <input
+                          type="text"
+                          aria-label="Form field default value"
+                          value={selectedNode.defaultValue || ''}
+                          onFocus={beginGestureTransaction}
+                          onChange={(e) =>
+                            updateSelectedLive((n) => ({
+                              ...n,
+                              defaultValue: e.target.value,
+                            }))
+                          }
+                          onBlur={() =>
+                            endGestureTransaction('Set Default Value')
+                          }
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-zinc-400 mb-1">
+                            Min Length
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            aria-label="Minimum length"
+                            value={selectedNode.minLength ?? ''}
+                            onFocus={beginGestureTransaction}
+                            onChange={(e) =>
+                              updateSelectedLive((n) => ({
+                                ...n,
+                                minLength:
+                                  e.target.value === ''
+                                    ? undefined
+                                    : Math.max(0, Number(e.target.value)),
+                              }))
+                            }
+                            onBlur={() =>
+                              endGestureTransaction('Set Min Length')
+                            }
+                            className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-zinc-400 mb-1">
+                            Max Length
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            aria-label="Maximum length"
+                            value={selectedNode.maxLength ?? ''}
+                            onFocus={beginGestureTransaction}
+                            onChange={(e) =>
+                              updateSelectedLive((n) => ({
+                                ...n,
+                                maxLength:
+                                  e.target.value === ''
+                                    ? undefined
+                                    : Math.max(0, Number(e.target.value)),
+                              }))
+                            }
+                            onBlur={() =>
+                              endGestureTransaction('Set Max Length')
+                            }
+                            className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
+                          />
+                        </div>
+                      </div>
                       <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                         <input
                           type="checkbox"
@@ -2926,6 +3300,34 @@ export default function LikharaEditor({
                         />
                         Required field (`required`)
                       </label>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedNode.disabled)}
+                            onChange={(e) =>
+                              updateSelectedDiscrete(
+                                (n) => ({ ...n, disabled: e.target.checked }),
+                                'Toggle Disabled Field'
+                              )
+                            }
+                          />
+                          Disabled
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedNode.readOnly)}
+                            onChange={(e) =>
+                              updateSelectedDiscrete(
+                                (n) => ({ ...n, readOnly: e.target.checked }),
+                                'Toggle Read-Only Field'
+                              )
+                            }
+                          />
+                          Read-only
+                        </label>
+                      </div>
                     </div>
                   )}
 
@@ -2953,6 +3355,80 @@ export default function LikharaEditor({
                           onBlur={() => endGestureTransaction('Set Image Src')}
                           className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-100"
                         />
+                        {selectedNode.src && !isSafeUrl(selectedNode.src, true) && (
+                          <p className="mt-1 text-[10px] text-rose-400">
+                            Unsafe image URL protocol rejected.
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <input
+                          ref={imageUploadRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            setImageUploadError(null);
+                            if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) {
+                              setImageUploadError('Unsupported file type. Use PNG, JPEG, WebP, GIF, or SVG.');
+                              return;
+                            }
+                            if (file.size > MAX_IMAGE_DATA_URL_BYTES) {
+                              setImageUploadError('Image exceeds 512 KB limit for local project storage.');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                updateSelectedDiscrete(
+                                  (n) => ({ ...n, src: reader.result as string }),
+                                  'Replace Local Image'
+                                );
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => imageUploadRef.current?.click()}
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-sky-400" />
+                          Upload Local Image (≤ 512 KB)
+                        </button>
+                        {imageUploadError && (
+                          <p role="alert" className="mt-1 text-[10px] text-rose-400">
+                            {imageUploadError}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-zinc-400 mb-1">
+                          Object Fit
+                        </label>
+                        <select
+                          aria-label="Image object fit"
+                          value={selectedNode.objectFit || 'cover'}
+                          onChange={(e) =>
+                            updateSelectedDiscrete(
+                              (n) => ({
+                                ...n,
+                                objectFit: e.target.value as 'cover' | 'contain' | 'fill' | 'none',
+                              }),
+                              'Set Image Fit'
+                            )
+                          }
+                          className="w-full px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-100"
+                        >
+                          <option value="cover">cover</option>
+                          <option value="contain">contain</option>
+                          <option value="fill">fill</option>
+                          <option value="none">none</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[10px] text-zinc-400 mb-1">
